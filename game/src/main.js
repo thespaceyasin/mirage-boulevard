@@ -2,22 +2,25 @@
 // Gameplay Wiring, Deterministic Shot Presets, and QA Test Hooks.
 
 import * as THREE from 'three';
+import { TitleMenuController } from './ui/titleMenu.js';
+import { HudDashboard } from './ui/hudDashboard.js';
+import { SolaraCustomsGarage } from './systems/garageShop.js';
+import { SyndicateCrewSystem } from './systems/crewSystem.js';
+import { MissionDirector } from './systems/missionDirector.js';
+import { PoliceDispatchSystem } from './systems/policeDispatch.js';
+import { CombatSystem } from './systems/combatSystem.js';
+import { TrafficSystem } from './systems/trafficSystem.js';
+import { VfxSystem } from './systems/vfxSystem.js';
 import { SaveManager } from './systems/saveManager.js';
 import { AudioEngine } from './audio/audioEngine.js';
-import { VfxSystem } from './systems/vfxSystem.js';
-import { RoadNetwork } from './world/roadNetwork.js';
-import { CameraRig, InputController } from './engine/cameraInput.js';
-import { MOOD_PRESETS, RendererPipeline } from './engine/rendererPipeline.js';
-import { CombatSystem } from './systems/combatSystem.js';
-import { PoliceDispatchSystem } from './systems/policeDispatch.js';
-import { MissionDirector } from './systems/missionDirector.js';
-import { TrafficSystem } from './systems/trafficSystem.js';
-import { HudDashboard } from './ui/hudDashboard.js';
-import { buildSolaraBayCity } from './world/cityBuilder.js';
-import { buildCityProps } from './world/cityProps.js';
-import { CITY_CONFIG, GARAGE_PAINTS, MISSIONS, VEHICLE_SPECS } from './engine/gameConfig.js';
 import { VehicleEntity, resolveVehiclePairCollisions } from './entities/vehiclePhysics.js';
 import { PlayerController } from './entities/characterRig.js';
+import { RoadNetwork } from './world/roadNetwork.js';
+import { buildSolaraBayCity } from './world/cityBuilder.js';
+import { buildCityProps } from './world/cityProps.js';
+import { CameraRig, InputController } from './engine/cameraInput.js';
+import { MOOD_PRESETS, RendererPipeline } from './engine/rendererPipeline.js';
+import { CITY_CONFIG } from './engine/gameConfig.js';
 
 class MirageBoulevardGame {
   constructor() {
@@ -35,7 +38,9 @@ class MirageBoulevardGame {
     this.traffic = new TrafficSystem(this.renderer.scene, this.roadNetwork, this.vehicles);
     this.combat = new CombatSystem(this.renderer.scene, this.roadNetwork);
     this.police = new PoliceDispatchSystem(this.renderer.scene, this.roadNetwork, this.vehicles);
-    this.missions = new MissionDirector(this.renderer.scene, this.roadNetwork);
+    this.crewSystem = new SyndicateCrewSystem();
+    this.garageShop = new SolaraCustomsGarage();
+    this.missions = new MissionDirector(this.renderer.scene, this.roadNetwork, this.crewSystem, this.garageShop);
     this.vfx = new VfxSystem(this.renderer.scene);
     this.saveManager = new SaveManager();
     this.audio = new AudioEngine();
@@ -53,6 +58,8 @@ class MirageBoulevardGame {
       colorHex: 0x1de9d8,
     }));
 
+    this._seedDefaultCampaignSaves();
+
     this.mode = 'start'; // start | play | dashboard | garage | wasted
     this.pausedForShot = false;
     this.elapsed = 0;
@@ -60,12 +67,32 @@ class MirageBoulevardGame {
     this.fpsSmoothed = 60;
     this.hitstopTimer = 0;
 
-    this.ui = new HudDashboard({
-      onStartGame: (loadLatest) => this.startGame(loadLatest),
-      onOpenDashboardFromStart: () => {
+    this.titleMenu = new TitleMenuController({
+      onContinueCampaign: () => this.startGame(true, false),
+      onNewGame: () => this.startGame(false, false),
+      onOpenSaveSlots: () => {
         this.audio.unlock();
         this.setMode('dashboard');
       },
+      onEnterFreeRoam: () => this.startGame(false, true),
+      onCycleMood: () => {
+        const preset = this.renderer.cycleMood();
+        this._syncTitleMenu();
+        this.ui.showToast(`TIME OF DAY: ${preset.label}`);
+      },
+      onToggleAudio: () => {
+        this.audio.unlock();
+        this.audio.toggleMute();
+        this._syncTitleMenu();
+      },
+      onCycleCamera: () => {
+        const label = this.cameraRig.cyclePreset();
+        this._syncTitleMenu();
+        this.ui.showToast(`CAMERA: ${label}`);
+      },
+    });
+
+    this.ui = new HudDashboard({
       onToggleDashboard: (open) => this.setMode(open ? 'dashboard' : 'play'),
       onToggleGarage: (open) => this.setMode(open ? 'garage' : 'play'),
       onCycleMood: () => {
@@ -80,7 +107,7 @@ class MirageBoulevardGame {
       },
       onActivateCrew: (id) => {
         this.audio.unlock();
-        this.missions.activateCrewAbility(id, this._sysContext());
+        this.crewSystem.activateCrewAbility(id, this._sysContext());
       },
       onSetMapWaypoint: (wx, wz) => {
         this.missions.customWaypoint = { x: wx, z: wz };
@@ -102,24 +129,19 @@ class MirageBoulevardGame {
         }
       },
       onSelectPaint: (paintId) => {
-        if (this.missions.applyGaragePaint(paintId, this.player, this.audio)) {
+        if (this.garageShop.applyMetallicRespray(paintId, this.player, this.audio)) {
           this.ui.renderGarage(this._uiState());
           this.ui.showToast('CUSTOM RESPRAY APPLIED');
         }
       },
       onBuyUpgrade: (upgId) => {
-        if (this.missions.buyGarageUpgrade(upgId, this.player, this.audio)) {
+        if (this.garageShop.purchasePerformanceUpgrade(upgId, this.player, this.audio)) {
           this.ui.renderGarage(this._uiState());
           this.ui.showToast('PERFORMANCE UPGRADE INSTALLED');
         }
       },
       onGarageRepair: () => {
-        if (this.player.cash >= 300) {
-          this.player.cash -= 300;
-          if (this.player.vehicle) this.player.vehicle.repairFull();
-          this.player.refillAmmoAndVitals();
-          this.police.clearHeat();
-          this.audio.playMissionComplete();
+        if (this.garageShop.repairHullAndClearWantedHeat(this.player, this.police, this.audio)) {
           this.ui.renderGarage(this._uiState());
           this.ui.showToast('HULL RESTORED & WANTED HEAT WIPED');
         }
@@ -135,6 +157,28 @@ class MirageBoulevardGame {
     requestAnimationFrame((t) => this._loop(t));
   }
 
+  _seedDefaultCampaignSaves() {
+    this.saveManager.seedDemoSlotsIfEmpty({
+      cash: 14850,
+      health: 100,
+      armor: 85,
+      pos: { x: 96, z: -24 },
+      district: 'MIRAGE BOULEVARD',
+      mood: 'golden',
+      heatPeak: 4,
+      careerPct: 54,
+      missions: {
+        activeMissionIndex: 4,
+        completedMissions: ['m1_coastal_pickup', 'm2_market_ambush', 'm3_boulevard_velocity', 'm4_hotwire_heist'],
+        collectedPalms: ['gp1', 'gp2', 'gp3', 'gp4', 'gp5'],
+        raceWins: 1,
+        ownedPaints: ['sunset_coral', 'cyber_cyan'],
+        activePaintId: 'sunset_coral',
+        upgrades: { engine: 2, handling: 2, armor: 1, nitro: 2 },
+      },
+    });
+  }
+
   _sysContext() {
     return {
       player: this.player,
@@ -147,10 +191,12 @@ class MirageBoulevardGame {
       combat: this.combat,
       police: this.police,
       missions: this.missions,
+      crewSystem: this.crewSystem,
+      garageShop: this.garageShop,
       vfx: this.vfx,
       audio: this.audio,
       nightFactor: this.renderer.nightFactor,
-      focusActive: this.missions.isFocusActive,
+      focusActive: this.crewSystem.isFocusActive,
       showToast: (msg) => this.ui.showToast(msg),
       triggerFlash: () => this.ui.triggerScreenFlash(),
       autoSave: () => this.saveToSlot('autosave'),
@@ -166,12 +212,23 @@ class MirageBoulevardGame {
     };
   }
 
+  _syncTitleMenu() {
+    const mood = MOOD_PRESETS[this.renderer.currentMood] || MOOD_PRESETS.golden;
+    const camNames = ['CHASE', 'ACTION LOW', 'BUMPER CAM', 'WIDE SCENIC'];
+    this.titleMenu.renderTitleMenuState({
+      visible: this.mode === 'start',
+      hasSaves: this.saveManager.hasAnySave(),
+      bestCareerPct: this.saveManager.getBestCareerPercent(),
+      currentMoodLabel: mood.label,
+      muted: this.audio.muted,
+      cameraLabel: camNames[this.cameraRig.presetIndex] || 'CHASE',
+    });
+  }
+
   setMode(newMode) {
     this.mode = newMode;
-    this.ui.setModeVisibility({
-      mode: newMode,
-      hasSaves: this.saveManager.hasAnySave(),
-    });
+    this.ui.setModeVisibility({ mode: newMode });
+    this._syncTitleMenu();
     if (newMode === 'dashboard') {
       this.ui.renderDashboard(this._uiState());
     } else if (newMode === 'garage') {
@@ -179,12 +236,33 @@ class MirageBoulevardGame {
     }
   }
 
-  startGame(loadLatest = false) {
+  startGame(loadLatest = false, freeRoam = false) {
     this.audio.unlock();
     if (loadLatest && this.saveManager.hasAnySave()) {
       this.loadFromSlot('autosave') || this.loadFromSlot('slot1');
+      if (!this.player.vehicle) {
+        this.heroCar.pos.set(this.player.pos.x, 0, this.player.pos.z);
+        this.heroCar.syncTransform();
+        this.player.enterVehicle(this.heroCar);
+        this.cameraRig.yaw = this.heroCar.heading;
+      }
+    } else if (freeRoam) {
+      this.player.cash = Math.max(this.player.cash, 12500);
+      this.player.refillAmmoAndVitals();
+      this.heroCar.repairFull();
+      this.heroCar.pos.set(100.6, 0, -24);
+      this.heroCar.heading = 0;
+      this.heroCar.syncTransform();
+      this.player.enterVehicle(this.heroCar);
+      this.cameraRig.yaw = this.heroCar.heading;
+      this.missions.enterFreeRoam(this._sysContext());
     } else {
-      this.player.pos.set(95, 0, -24);
+      this.player.cash = 3500;
+      this.player.refillAmmoAndVitals();
+      this.heroCar.repairFull();
+      this.heroCar.pos.set(100.6, 0, -24);
+      this.heroCar.heading = 0;
+      this.heroCar.syncTransform();
       this.player.enterVehicle(this.heroCar);
       this.cameraRig.yaw = this.heroCar.heading;
       this.missions.startMission(0, this._sysContext(), false);
@@ -259,14 +337,13 @@ class MirageBoulevardGame {
   }
 
   _computeInteractPrompt() {
-    if (this.missions.nearGarage) {
+    if (this.garageShop.nearGarage) {
       return '[G] ENTER SOLARA CUSTOMS GARAGE — UPGRADE & RESPRAY';
     }
     if (!this.player.vehicle) {
-      const nearV = this._findNearestEnterableVehicle(5.6);
+      const nearV = this._findNearestEnterableVehicle(5.8);
       if (nearV) {
-        const verb = nearV.role === 'traffic' || nearV.role === 'police' ? 'HIJACK' : 'ENTER';
-        return `[F] ${verb} ${nearV.spec.name}`;
+        return `[F] STEAL ${nearV.spec.name}`;
       }
     } else if (Math.hypot(this.player.pos.x - CITY_CONFIG.raceStartPos.x, this.player.pos.z - CITY_CONFIG.raceStartPos.z) < 12) {
       return '[G] START COASTAL STREET RACE';
@@ -275,15 +352,13 @@ class MirageBoulevardGame {
   }
 
   _handlePlayHotkeys(wheel) {
-    // Pause / Interactive City Map Dashboard
     if (this.input.wasPressed('Escape') || this.input.wasPressed('KeyP') || this.input.wasPressed('KeyM')) {
       this.setMode('dashboard');
       return;
     }
 
-    // Garage Shop or Street Race trigger
     if (this.input.wasPressed('KeyG')) {
-      if (this.missions.nearGarage) {
+      if (this.garageShop.nearGarage) {
         this.setMode('garage');
         return;
       }
@@ -293,7 +368,6 @@ class MirageBoulevardGame {
       }
     }
 
-    // Enter / Carjack / Exit Vehicle
     if (this.input.wasPressed('KeyF') || this.input.wasPressed('KeyE')) {
       if (this.player.vehicle) {
         this.player.exitVehicle(this.roadNetwork);
@@ -303,18 +377,17 @@ class MirageBoulevardGame {
         if (nearV) {
           const wasTraffic = nearV.role === 'traffic' || nearV.role === 'police';
           this.player.enterVehicle(nearV);
-          nearV.applyGarageUpgrades(this.missions.upgrades);
+          nearV.applyGarageUpgrades(this.garageShop.upgrades);
           this.cameraRig.yaw = nearV.heading;
           this.audio.playUiClick(680);
           if (wasTraffic) {
             this.police.reportCrime(nearV.spec.isPolice ? 34 : 18, nearV.spec.isPolice ? 'STOLEN POLICE CRUISER' : 'GRAND THEFT AUTO');
-            this.ui.showToast(`HIJACKED ${nearV.spec.name}`);
+            this.ui.showToast(`STOLE ${nearV.spec.name}`);
           }
         }
       }
     }
 
-    // Weapons 1-5 & mouse wheel
     for (let i = 0; i < 5; i += 1) {
       if (this.input.wasPressed(`Digit${i + 1}`)) {
         this.player.selectWeapon(i);
@@ -329,12 +402,11 @@ class MirageBoulevardGame {
       this.combat.startReload(this.player, this.audio);
     }
 
-    // Crew Abilities Z / X / C
-    if (this.input.wasPressed('KeyZ')) this.missions.activateCrewAbility('blackout', this._sysContext());
-    if (this.input.wasPressed('KeyX')) this.missions.activateCrewAbility('nitro', this._sysContext());
-    if (this.input.wasPressed('KeyC')) this.missions.activateCrewAbility('focus', this._sysContext());
+    // Syndicate Crew Abilities Z / X / C
+    if (this.input.wasPressed('KeyZ')) this.crewSystem.activateCrewAbility('blackout', this._sysContext());
+    if (this.input.wasPressed('KeyX')) this.crewSystem.activateCrewAbility('nitro', this._sysContext());
+    if (this.input.wasPressed('KeyC')) this.crewSystem.activateCrewAbility('focus', this._sysContext());
 
-    // Radio Q / Tab, Camera V, Mood T
     if (this.input.wasPressed('KeyQ') || this.input.wasPressed('Tab')) {
       const st = this.audio.nextRadioStation();
       this.ui.showToast(`RADIO: ${st.name}`);
@@ -358,7 +430,7 @@ class MirageBoulevardGame {
     try {
       if (this.mode === 'start') {
         if (this.input.wasPressed('Enter') || this.input.wasPressed('Space')) {
-          this.startGame(false);
+          this.startGame(true, false);
           return;
         }
         this.elapsed += dt;
@@ -368,7 +440,7 @@ class MirageBoulevardGame {
         this.city.update(this.elapsed, mood);
         this.cityProps.update(this.elapsed, mood, this.missions.collectedPalms);
         this.renderer.updateLighting(this.heroCar.pos, this.elapsed);
-        this.cameraRig.updateTitleOrbit(this.elapsed, this.heroCar.pos);
+        this.titleMenu.updateTitlePanoramaCamera(this.cameraRig, this.elapsed, this.heroCar.pos);
         this.vfx.update(dt);
         this.audio.updateContinuous(dt, this.elapsed, { paused: true });
         return;
@@ -398,12 +470,11 @@ class MirageBoulevardGame {
         return;
       }
 
-      // Active Play Mode
       this._handlePlayHotkeys(wheel);
       if (this.mode !== 'play') return;
 
       if (this.hitstopTimer > 0) this.hitstopTimer = Math.max(0, this.hitstopTimer - dt);
-      const timeScale = this.hitstopTimer > 0 ? 0.12 : this.missions.isFocusActive ? 0.48 : 1.0;
+      const timeScale = this.crewSystem.getSimulationTimeScale(this.hitstopTimer);
       const simDt = dt * timeScale;
       this.elapsed += simDt;
 
@@ -411,16 +482,15 @@ class MirageBoulevardGame {
       const ctx = this._sysContext();
       this.roadNetwork.updateSignals(simDt);
 
-      // Player movement (driving or on foot)
       if (this.player.vehicle) {
         const axes = this.input.getMoveAxes();
         const v = this.player.vehicle;
-        const nitroHeld = axes.sprint || this.missions.isOverdriveActive;
+        const nitroHeld = axes.sprint || this.crewSystem.isOverdriveActive;
         const impact = v.stepPhysics(
           simDt,
           { throttle: axes.forward, steer: axes.right, handbrake: axes.handbrake, nitro: nitroHeld },
           this.roadNetwork,
-          this.missions.upgrades,
+          this.garageShop.upgrades,
           this.vfx,
           this.elapsed,
           mood.nightFactor,
@@ -439,7 +509,6 @@ class MirageBoulevardGame {
         this.player.updateOnFoot(simDt, this.elapsed, this.input, this.cameraRig.yaw, this.roadNetwork, this.vehicles);
       }
 
-      // Parked / mission vehicles idle update
       for (let i = 0; i < this.vehicles.length; i += 1) {
         const v = this.vehicles[i];
         if (v.role === 'parked' || v.role === 'mission') {
@@ -447,12 +516,10 @@ class MirageBoulevardGame {
         }
       }
 
-      // Player shooting (on foot or drive-by SMG/pistol)
       if (this.input.mouseDown) {
         this.combat.tryPlayerFire(this.player, this.renderer.camera, ctx);
       }
 
-      // Systems updates
       this.traffic.update(simDt, this.elapsed, this.player.pos, mood.nightFactor, this.vfx);
       this.police.update(simDt, this.elapsed, ctx);
       resolveVehiclePairCollisions(
@@ -475,7 +542,6 @@ class MirageBoulevardGame {
       this.renderer.updateLighting(this.player.pos, this.elapsed);
       this.renderer.decayTransientLights(dt);
 
-      // Camera update (always runs on real dt)
       this.cameraRig.updateGameplay(dt, {
         mode: this.player.vehicle ? 'vehicle' : 'foot',
         targetPos: this.player.pos,
@@ -488,7 +554,6 @@ class MirageBoulevardGame {
         roadNetwork: this.roadNetwork,
       });
 
-      // Audio continuous update
       this.audio.updateContinuous(dt, this.elapsed, {
         inVehicle: Boolean(this.player.vehicle),
         speed: this.player.vehicle ? this.player.vehicle.speed : 0,
@@ -540,42 +605,40 @@ class MirageBoulevardGame {
     this.elapsed = 14.2;
 
     if (name === 'chase') {
-      // 1-chase.jpg (Cover): Golden-hour 4-star coastal chase down palm-lined Mirage Boulevard!
+      // 1-chase.jpg (Cover): Dramatic close golden-hour drift pursuit down Mirage Boulevard!
       this.renderer.setMood('golden');
       this.player.cash = 14850;
       this.player.health = 94;
       this.player.armor = 78;
-      this.player.selectWeapon(1); // Viper Micro-SMG
+      this.player.selectWeapon(1);
 
-      // Position player's Sunset Coral Solara Apex GT drifting down Mirage Boulevard toward Marina/Sunset!
       this.heroCar.repairFull();
       this.heroCar.setPaint(0xff4b68);
-      this.heroCar.pos.set(97.5, 0, -28);
-      this.heroCar.heading = 0.28; // Dynamic drift angle
-      this.heroCar.vel.set(10, 0, 39);
-      this.heroCar.speed = 44.5;
-      this.heroCar.forwardSpeed = 43.2;
-      this.heroCar.lateralSpeed = 8.4;
+      this.heroCar.pos.set(98.4, 0, -28.0);
+      this.heroCar.heading = 0.32;
+      this.heroCar.vel.set(11, 0, 41);
+      this.heroCar.speed = 46.5;
+      this.heroCar.forwardSpeed = 44.8;
+      this.heroCar.lateralSpeed = 8.6;
       this.heroCar.drifting = true;
       this.heroCar.nitroActive = true;
-      this.heroCar.nitro = 82;
-      this.heroCar.steerAngle = -0.35;
+      this.heroCar.nitro = 84;
+      this.heroCar.steerAngle = -0.42;
       this.heroCar.syncTransform();
       this.player.enterVehicle(this.heroCar);
 
-      // 4-star SBPD pursuit: 2 Interceptors + 1 Tactical SUV + Sky-Eye Helicopter overhead!
+      // Close pursuing SBPD Interceptors + Tactical SUV roadblock + Sky-Eye Helicopter
       this.police.setWantedLevel(4);
       this.police.inSight = true;
-      const cop1 = this.police.spawnPoliceUnit(this.player.pos, 0, 'RAM', { x: 92.5, z: -13, heading: 0.14 });
-      cop1.speed = 36; cop1.forwardSpeed = 36; cop1.sirenActive = true; cop1.syncTransform();
-      const cop2 = this.police.spawnPoliceUnit(this.player.pos, 0, 'FLANK', { x: 103.5, z: -10, heading: -0.1 });
-      cop2.speed = 35; cop2.forwardSpeed = 35; cop2.sirenActive = true; cop2.syncTransform();
-      const swat = this.police.spawnPoliceUnit(this.player.pos, 0, 'ROADBLOCK', { x: 97.0, z: 12, heading: 1.38 });
+      const cop1 = this.police.spawnPoliceUnit(this.player.pos, 0, 'RAM', { x: 93.2, z: -15.5, heading: 0.16 });
+      cop1.speed = 38; cop1.forwardSpeed = 38; cop1.sirenActive = true; cop1.syncTransform();
+      const cop2 = this.police.spawnPoliceUnit(this.player.pos, 0, 'FLANK', { x: 103.8, z: -10.5, heading: -0.14 });
+      cop2.speed = 37; cop2.forwardSpeed = 37; cop2.sirenActive = true; cop2.syncTransform();
+      const swat = this.police.spawnPoliceUnit(this.player.pos, 0, 'ROADBLOCK', { x: 97.2, z: 13.5, heading: 1.4 });
       swat.sirenActive = true; swat.syncTransform();
 
-      // Position SBPD Sky-Eye Police Helicopter right-side-up in dramatic banked 3/4 view!
       this.police.heliActive = true;
-      this.police.heliPos.set(106.5, 16.5, 6);
+      this.police.heliPos.set(105.5, 16.0, 5.5);
       this.police.heli.root.visible = true;
       this.police.heli.root.position.copy(this.police.heliPos);
       this.police.heli.root.rotation.order = 'YXZ';
@@ -583,24 +646,46 @@ class MirageBoulevardGame {
       this.police.heli.root.rotation.set(0.16, hYaw, -0.18);
       this.police.heli.update(0.016, this.elapsed, this.heroCar.pos);
 
-      // Clear any overlapping traffic near Mirage Boulevard foreground and place clean coastal cars
+      // Clear foreground overlap & place coastal civilian traffic + boardwalk pedestrians in frame
       for (const v of this.vehicles) {
         if (v.role === 'traffic' && Math.hypot(v.pos.x - 96, v.pos.z + 10) < 35) {
           v.pos.z += 95;
           v.syncTransform();
         }
       }
-      const trafficNear = this.traffic.spawnTrafficVehicle(null, 'bayside_cruiser', {
-        x: 91.0, z: -1, heading: Math.PI, axis: 'z', dir: -1, laneCoord: 91.0,
+      const trafficA = this.traffic.spawnTrafficVehicle(null, 'bayside_cruiser', {
+        x: 91.2, z: 1.5, heading: Math.PI, axis: 'z', dir: -1, laneCoord: 91.2,
       });
-      trafficNear.setPaint(0x1de9d8);
-      for (let i = 0; i < 8; i += 1) {
-        this.vfx.spawnDriftSmoke(95.4 - i * 0.55, 0.25, -30.5 - i * 0.55);
+      trafficA.setPaint(0x1de9d8);
+      const trafficB = this.traffic.spawnTrafficVehicle(null, 'mirage_coupe', {
+        x: 101.2, z: 26.0, heading: 0, axis: 'z', dir: 1, laneCoord: 101.2,
+      });
+      trafficB.setPaint(0xffb347);
+
+      // Position 4 pedestrians visibly on the foreground boardwalk & hotel sidewalk
+      const pedSpots = [
+        { x: 110.8, z: -18.5, h: 0.4 },
+        { x: 112.4, z: -13.0, h: -0.2 },
+        { x: 84.5, z: -17.0, h: 0.1 },
+        { x: 84.8, z: -6.5, h: 3.0 },
+      ];
+      for (let i = 0; i < Math.min(pedSpots.length, this.traffic.pedestrians.length); i += 1) {
+        const p = this.traffic.pedestrians[i];
+        p.pos.set(pedSpots[i].x, 0, pedSpots[i].z);
+        p.heading = pedSpots[i].h;
+        p.rig.root.position.copy(p.pos);
+        p.rig.root.rotation.y = p.heading;
+        p.rig.animate(2.2, this.elapsed + i, false, false);
       }
 
-      // Active story mission + character dialogue
+      // Rich dual-wheel tire drift smoke trailing behind rear tires without obscuring taillights
+      for (let i = 0; i < 6; i += 1) {
+        this.vfx.spawnDriftSmoke(96.6 - i * 0.48, 0.22, -30.1 - i * 0.55);
+        this.vfx.spawnDriftSmoke(98.4 - i * 0.48, 0.22, -30.8 - i * 0.55);
+      }
+
       this.missions.completedMissions = new Set(['m1_coastal_pickup', 'm2_market_ambush', 'm3_boulevard_velocity']);
-      this.missions.activeMissionIndex = 3; // Hotwire Heist
+      this.missions.activeMissionIndex = 3;
       this.missions.missionStage = 'deliver';
       this.missions.showDialogue('Rico Vega', 'WHEELMAN', 'Four-star heat on Mirage Boulevard! Air-1 is locked on — hit Nitro [X] and shake them at the Marina!', 99);
 
@@ -617,49 +702,55 @@ class MirageBoulevardGame {
           steerAngle: v.steerAngle,
           braking: false,
           sirenActive: v.sirenActive,
-          nitroActive: v.nitroActive,
+          nitroActive: v.nitroActive || (v.drifting && v.speed > 22),
           wrecked: v.wrecked,
         });
       }
-      this.renderer.dynamicLights.strobeRed.position.set(92.5, 3.2, -13);
-      this.renderer.dynamicLights.strobeRed.intensity = 34;
-      this.renderer.dynamicLights.strobeBlue.position.set(103.5, 3.2, -10);
-      this.renderer.dynamicLights.strobeBlue.intensity = 34;
+      this.renderer.dynamicLights.strobeRed.position.set(93.2, 3.2, -15.5);
+      this.renderer.dynamicLights.strobeRed.intensity = 36;
+      this.renderer.dynamicLights.strobeBlue.position.set(103.8, 3.2, -10.5);
+      this.renderer.dynamicLights.strobeBlue.intensity = 36;
 
-      // Hero cinematic chase camera showing Apex GT, pursuing SBPD cruisers, roadblock, Helicopter, palms, Art-Deco hotels & golden ocean!
+      // Closer, lower hero chase framing: Apex GT clear above dialogue banner, cruisers, heli, beach & pedestrians all visible!
       this.cameraRig.setImmediate(
-        new THREE.Vector3(88.2, 5.2, -39.5),
-        new THREE.Vector3(101.2, 4.4, 2.0),
-        60,
+        new THREE.Vector3(94.6, 3.35, -36.2),
+        new THREE.Vector3(100.4, 2.35, 6.0),
+        58,
       );
       this.ui.updateHud(0.016, this._uiState());
       return { state: 'chase' };
     }
 
     if (name === 'combat') {
-      // 2-combat.jpg: Neon Night on-foot shootout + burning/exploding car in Lantern Night Market!
+      // 2-combat.jpg: Neon Night shootout + multi-layered car explosion + [F] STEAL prompt in Lantern Night Market!
       this.renderer.setMood('night');
       this.player.cash = 8650;
       this.player.health = 84;
       this.player.armor = 62;
       if (this.player.vehicle) this.player.exitVehicle(this.roadNetwork);
       this.player.selectWeapon(3); // Meridian Carbine
-      this.player.pos.set(-5.2, 0, 74.5);
-      this.player.heading = 0.14;
+      this.player.pos.set(-5.0, 0, 74.8);
+      this.player.heading = -0.22;
       this.player.aiming = true;
       this.player.rig.animate(2.5, this.elapsed, true, false);
       this.player.syncTransform();
 
+      // Park a sleek Lagoon Cyan Mirage GT Coupe right within steal range (~4.1m) so [F] STEAL prompt shows clearly!
+      const stealCar = new VehicleEntity(this.renderer.scene, 'mirage_coupe', -8.3, 77.6, 0.34, {
+        role: 'parked',
+        colorHex: 0x1de9d8,
+      });
+      this.vehicles.push(stealCar);
+
       this.police.setWantedLevel(3);
       this.police.inSight = true;
       this.missions.completedMissions = new Set(['m1_coastal_pickup']);
-      this.missions.startMission(1, this._sysContext(), true); // Night Market Ambush
+      this.missions.startMission(1, this._sysContext(), true);
       this.missions.missionEnemiesRemaining = 3;
-      this.missions.showDialogue('Tessa Vance', 'TACTICIAN', 'Meridian ambush in Lantern Night Market! Pop Tactical Focus [C] and take out their gunmen!', 99);
+      this.missions.showDialogue('Tessa Vance', 'TACTICIAN', 'Meridian ambush in Lantern Night Market! Steal [F] the coupe or pop Focus [C] and clear them!', 99);
 
-      // Clear default circle & place tactical combat scene right under the glowing neon market arches!
       this.combat.clearMissionEnemies();
-      const e1 = this.combat.spawnEnemy('cartel', -8.8, 92.5, 'm2_market_ambush');
+      const e1 = this.combat.spawnEnemy('cartel', -8.4, 93.0, 'm2_market_ambush');
       const e2 = this.combat.spawnEnemy('cartel', 3.4, 96.0, 'm2_market_ambush');
       const e3 = this.combat.spawnEnemy('police', -1.8, 102.5, 'm2_market_ambush');
       for (const e of [e1, e2, e3]) {
@@ -668,10 +759,10 @@ class MirageBoulevardGame {
         e.rig.animate(1.5, this.elapsed, true, false);
       }
 
-      // Exploding blazing SBPD cruiser & wrecked cartel coupe in the market lane!
-      const burningCar = new VehicleEntity(this.renderer.scene, 'sbpd_interceptor', 2.6, 89.2, -0.58, {
+      // Burning/exploding SBPD Interceptor with multi-layer fireball cluster + smoke column + sparks!
+      const burningCar = new VehicleEntity(this.renderer.scene, 'sbpd_interceptor', 2.8, 89.2, -0.58, {
         role: 'police',
-        sirenActive: true,
+        sirenActive: false,
         dispatchRole: 'RAM',
         callsign: 'UNIT-2',
       });
@@ -679,27 +770,26 @@ class MirageBoulevardGame {
       this.police.policeUnits.push(burningCar);
       burningCar.wrecked = true;
       burningCar.visual.setWrecked(true);
-      this.vfx.spawnExplosion(new THREE.Vector3(2.6, 0.8, 89.2), 1.45);
-      this.vfx.spawnFirePlume(2.6, 1.5, 89.2, 1.5);
-      this.vfx.spawnFirePlume(1.9, 1.9, 89.6, 1.3);
+      this.vfx.spawnExplosion(new THREE.Vector3(2.8, 0.85, 89.2), 1.3);
+      this.vfx.spawnFirePlume(2.6, 1.35, 89.2, 1.25);
 
       const intactCop = this.police.spawnPoliceUnit(this.player.pos, 0, 'FLANK', { x: -11.4, z: 100.5, heading: -2.4 });
       intactCop.sirenActive = true;
 
-      // Active tracer fire & bright muzzle flash
-      const muzzlePos = new THREE.Vector3(-4.8, 1.48, 75.3);
-      this.vfx.spawnMuzzleFlash(muzzlePos, 2.1);
-      this.vfx.spawnTracer(muzzlePos, new THREE.Vector3(-8.4, 1.3, 92.2), 0xffcf5a, 1.0);
-      this.vfx.spawnTracer(new THREE.Vector3(3.1, 1.45, 95.8), new THREE.Vector3(-3.5, 1.6, 78.0), 0xff4b68, 1.0);
-      this.vfx.spawnSparks(-8.4, 1.3, 92.2, 18, 11);
+      // Active tracer fire & crisp muzzle flash right from Mateo's Meridian Carbine barrel
+      const muzzlePos = new THREE.Vector3(-4.9, 1.44, 75.85);
+      this.vfx.spawnMuzzleFlash(muzzlePos, 1.35);
+      this.vfx.spawnTracer(muzzlePos, new THREE.Vector3(-8.2, 1.3, 92.8), 0xffcf5a, 1.0);
+      this.vfx.spawnTracer(new THREE.Vector3(3.1, 1.45, 95.8), new THREE.Vector3(-3.2, 1.55, 78.2), 0xff4b68, 1.0);
+      this.vfx.spawnSparks(-8.2, 1.3, 92.8, 18, 11);
       this.combat.hitmarkerTimer = 0.2;
 
-      this.renderer.pulseExplosionLight(new THREE.Vector3(2.6, 2.8, 89.2), 75);
+      this.renderer.pulseExplosionLight(new THREE.Vector3(2.8, 2.8, 89.2), 72);
       this.renderer.pulseMuzzleLight(muzzlePos);
       this.renderer.dynamicLights.strobeRed.position.set(-11.4, 3.2, 100.5);
-      this.renderer.dynamicLights.strobeRed.intensity = 30;
+      this.renderer.dynamicLights.strobeRed.intensity = 32;
       this.renderer.dynamicLights.strobeBlue.position.set(-10.0, 3.2, 100.5);
-      this.renderer.dynamicLights.strobeBlue.intensity = 30;
+      this.renderer.dynamicLights.strobeBlue.intensity = 32;
 
       this.setMode('play');
       const mood = MOOD_PRESETS.night;
@@ -719,78 +809,23 @@ class MirageBoulevardGame {
         });
       }
       this.cameraRig.setImmediate(
-        new THREE.Vector3(-7.6, 2.75, 69.2),
-        new THREE.Vector3(-1.5, 2.1, 93.0),
-        54,
+        new THREE.Vector3(-3.15, 2.45, 70.1),
+        new THREE.Vector3(-3.4, 1.9, 92.0),
+        56,
       );
       this.ui.updateHud(0.016, this._uiState());
       return { state: 'combat' };
     }
 
-    if (name === 'city') {
-      // 3-city.jpg: Sun-soaked daytime exploration / carjacking on vibrant Mirage Boulevard!
-      this.renderer.setMood('day');
-      this.player.cash = 9400;
-      this.player.health = 100;
-      this.player.armor = 90;
-      if (this.player.vehicle) this.player.exitVehicle(this.roadNetwork);
-      this.player.selectWeapon(0);
-      this.player.pos.set(104.2, 0, -24.5);
-      this.player.heading = -1.25;
-      this.player.aiming = false;
-      this.player.rig.animate(0, this.elapsed, false, false);
-      this.player.syncTransform();
-
-      this.heroCar.repairFull();
-      this.heroCar.setPaint(0x1de9d8);
-      this.heroCar.pos.set(100.4, 0, -24.2);
-      this.heroCar.heading = 0.05;
-      this.heroCar.syncTransform();
-
-      // Clear any overlapping traffic near Mirage Boulevard foreground so every parked/moving car reads cleanly
-      for (const v of this.vehicles) {
-        if (v.role === 'traffic' && Math.hypot(v.pos.x - 96, v.pos.z + 14) < 38) {
-          v.pos.z += 90;
-          v.syncTransform();
-        }
-      }
-
-      // Add lively sunlit boulevard cars right in frame with clean spacing
-      const c1 = new VehicleEntity(this.renderer.scene, 'bayside_cruiser', 91.6, -12, Math.PI, { role: 'parked', colorHex: 0xff5e6c });
-      const c2 = new VehicleEntity(this.renderer.scene, 'mirage_coupe', 100.6, -3, 0, { role: 'parked', colorHex: 0xffb347 });
-      const c3 = new VehicleEntity(this.renderer.scene, 'sbpd_interceptor', 91.6, 14, Math.PI, { role: 'parked' });
-      this.vehicles.push(c1, c2, c3);
-
-      this.missions.completedMissions = new Set(['m1_coastal_pickup', 'm2_market_ambush']);
-      this.missions.activeMissionIndex = 2;
-      this.missions.activeDialogue = null;
-
-      this.setMode('play');
-      const mood = MOOD_PRESETS.day;
-      this.city.update(this.elapsed, mood);
-      this.cityProps.update(this.elapsed, mood, this.missions.collectedPalms);
-      this.renderer.updateLighting(this.player.pos, this.elapsed);
-      for (const v of this.vehicles) {
-        v.visual.updateVisuals({ elapsed: this.elapsed, nightFactor: 0, speed: 0, steerAngle: 0, braking: false, sirenActive: false, nitroActive: false, wrecked: false });
-      }
-      this.cameraRig.setImmediate(
-        new THREE.Vector3(111.5, 4.4, -34.2),
-        new THREE.Vector3(96.0, 2.8, -11.0),
-        56,
-      );
-      this.ui.updateHud(0.016, this._uiState());
-      return { state: 'city' };
-    }
-
     if (name === 'dashboard') {
-      // 4-dashboard.jpg: Pause / Interactive City Map + Career % + Missions + Crew + Save Slots over 3D skyline!
+      // 3-dashboard.jpg: Pause / Interactive City Map + 8 Story Missions + Crew + Solara Customs + Respect + Save Slots
       this.renderer.setMood('golden');
       this.player.cash = 14850;
       this.player.pos.set(96, 0, -18);
       this.missions.completedMissions = new Set(['m1_coastal_pickup', 'm2_market_ambush', 'm3_boulevard_velocity', 'm4_hotwire_heist']);
       this.missions.activeMissionIndex = 4;
       this.missions.collectedPalms = new Set(['gp1', 'gp2', 'gp3', 'gp4', 'gp5']);
-      this.missions.upgrades = { engine: 2, handling: 2, armor: 1, nitro: 2 };
+      this.garageShop.upgrades = { engine: 2, handling: 2, armor: 1, nitro: 2 };
       this.missions.raceWins = 1;
       this.police.heatPeak = 4;
       this.saveManager.saveSlot('autosave', { cash: 14850, careerPct: 54, district: 'MIRAGE BOULEVARD' });
@@ -810,13 +845,47 @@ class MirageBoulevardGame {
       return { state: 'dashboard' };
     }
 
+    if (name === 'title') {
+      // 4-title.jpg: Cinematic Main Menu over vibrant Golden-Hour coastal panorama of Solara Bay!
+      this.renderer.setMood('golden');
+      this.heroCar.repairFull();
+      this.heroCar.setPaint(0xff4b68);
+      this.heroCar.pos.set(100.6, 0, -24);
+      this.heroCar.heading = 0.25;
+      this.heroCar.syncTransform();
+
+      const mood = MOOD_PRESETS.golden;
+      this.city.update(this.elapsed, mood);
+      this.cityProps.update(this.elapsed, mood, this.missions.collectedPalms);
+      this.renderer.updateLighting(this.heroCar.pos, this.elapsed);
+      for (const v of this.vehicles) {
+        v.visual.updateVisuals({
+          elapsed: this.elapsed,
+          nightFactor: mood.nightFactor,
+          speed: 0,
+          steerAngle: 0,
+          braking: false,
+          sirenActive: false,
+          nitroActive: false,
+          wrecked: false,
+        });
+      }
+      this.setMode('start');
+      this.cameraRig.setImmediate(
+        new THREE.Vector3(88.5, 13.5, -48.0),
+        new THREE.Vector3(114.0, 4.2, 26.0),
+        56,
+      );
+      return { state: 'title' };
+    }
+
     throw new Error(`Unknown state: ${name}`);
   }
 
   _checkUrlShotPreset() {
     const params = new URLSearchParams(window.location.search);
     const shot = params.get('shot');
-    if (shot && ['chase', 'combat', 'city', 'dashboard'].includes(shot)) {
+    if (shot && ['chase', 'combat', 'dashboard', 'title'].includes(shot)) {
       this.applyScenarioState(shot);
       this.pausedForShot = true;
     }

@@ -1,27 +1,25 @@
 // 8-Mission Story Campaign Director, Coastal Street Race Circuit,
-// 3 Crew Abilities (Z Blackout / X Overdrive / C Focus), 10 Golden Palm Collectibles,
-// Character Portrait Dialogue Queue, Solara Customs Garage, and Career Progression %.
+// 10 Golden Palm Collectibles, Character Portrait Dialogue Queue,
+// and Career Progression % (delegating Crew & Garage systems).
 
 import * as THREE from 'three';
-import {
-  CITY_CONFIG,
-  CREW_ABILITIES,
-  GARAGE_PAINTS,
-  GARAGE_UPGRADES,
-  GOLDEN_PALMS,
-  MISSIONS,
-} from '../engine/gameConfig.js';
+import { CITY_CONFIG, GOLDEN_PALMS, MISSIONS } from '../engine/gameConfig.js';
 import { VehicleEntity } from '../entities/vehiclePhysics.js';
+import { SyndicateCrewSystem } from './crewSystem.js';
+import { SolaraCustomsGarage } from './garageShop.js';
 
 export class MissionDirector {
-  constructor(scene, roadNetwork) {
+  constructor(scene, roadNetwork, crewSystem = null, garageShop = null) {
     this.scene = scene;
     this.roadNetwork = roadNetwork;
+    this.crew = crewSystem || new SyndicateCrewSystem();
+    this.garage = garageShop || new SolaraCustomsGarage();
 
     this.activeMissionIndex = 0;
     this.completedMissions = new Set();
     this.collectedPalms = new Set();
     this.raceWins = 0;
+    this.freeRoamMode = false;
 
     this.missionStage = 'active'; // active | pickup | hold | race
     this.raceCheckpointIdx = 0;
@@ -29,20 +27,8 @@ export class MissionDirector {
     this.heistVehicle = null;
     this.missionEnemiesRemaining = 0;
 
-    // Garage & fleet upgrades
-    this.ownedPaints = new Set(['sunset_coral']);
-    this.activePaintId = 'sunset_coral';
-    this.upgrades = { engine: 0, handling: 0, armor: 0, nitro: 0 };
-    this.nearGarage = false;
-
     // Custom GPS waypoint (clicked on Interactive City Map)
     this.customWaypoint = null;
-
-    // Crew abilities state (Z / X / C)
-    this.crewState = {};
-    for (const ab of CREW_ABILITIES) {
-      this.crewState[ab.id] = { activeTimer: 0, cooldownTimer: 0 };
-    }
 
     // Active character dialogue banner
     this.activeDialogue = null;
@@ -50,23 +36,34 @@ export class MissionDirector {
   }
 
   get currentMission() {
-    if (this.activeMissionIndex >= MISSIONS.length) return null;
+    if (this.freeRoamMode || this.activeMissionIndex >= MISSIONS.length) return null;
     return MISSIONS[this.activeMissionIndex];
   }
 
   get isFocusActive() {
-    return this.crewState.focus.activeTimer > 0;
+    return this.crew.isFocusActive;
   }
 
   get isOverdriveActive() {
-    return this.crewState.nitro.activeTimer > 0;
+    return this.crew.isOverdriveActive;
+  }
+
+  get upgrades() {
+    return this.garage.upgrades;
+  }
+
+  set upgrades(val) {
+    this.garage.upgrades = val;
+  }
+
+  get nearGarage() {
+    return this.garage.nearGarage;
   }
 
   getCareerPercent() {
     const missionPct = (this.completedMissions.size / MISSIONS.length) * 60;
     const palmPct = (this.collectedPalms.size / GOLDEN_PALMS.length) * 20;
-    const upgTotal = (this.upgrades.engine + this.upgrades.handling + this.upgrades.armor + this.upgrades.nitro) / 12;
-    const upgPct = upgTotal * 15;
+    const upgPct = this.garage.getUpgradeProgressRatio() * 15;
     const racePct = Math.min(1, this.raceWins) * 5;
     return Math.min(100, Math.round(missionPct + palmPct + upgPct + racePct));
   }
@@ -78,6 +75,7 @@ export class MissionDirector {
 
   startMission(index, context, silent = false) {
     if (index < 0 || index >= MISSIONS.length) return;
+    this.freeRoamMode = false;
     this.activeMissionIndex = index;
     const m = MISSIONS[index];
     this.missionStage = m.type === 'heist' ? 'pickup' : m.type;
@@ -114,6 +112,18 @@ export class MissionDirector {
     }
   }
 
+  enterFreeRoam(context) {
+    this.freeRoamMode = true;
+    this.customWaypoint = null;
+    if (context.combat) context.combat.clearMissionEnemies();
+    this.showDialogue(
+      'Mateo Cruz',
+      'PROTAGONIST',
+      'Free Roam Solara Bay — hijack any ride, hit Stunt Ramps, hunt Golden Palms, or visit Solara Customs [G]!',
+      6.5,
+    );
+  }
+
   getActiveTargetPos() {
     if (this.customWaypoint) return this.customWaypoint;
     const m = this.currentMission;
@@ -129,7 +139,7 @@ export class MissionDirector {
 
   getObjectiveText() {
     const m = this.currentMission;
-    if (!m) return 'Free Roam Solara Bay — Replay Coastal Race or hunt Golden Palms';
+    if (!m) return 'Free Roam Solara Bay — Explore, Drift, Race or Hunt Golden Palms';
     if (m.type === 'race') {
       return `Coastal Street Race: Checkpoint ${this.raceCheckpointIdx + 1} / ${m.checkpoints.length}`;
     }
@@ -157,65 +167,6 @@ export class MissionDirector {
       return (m.enemyCount - this.missionEnemiesRemaining) / m.enemyCount;
     }
     return null;
-  }
-
-  activateCrewAbility(abilityId, context) {
-    const spec = CREW_ABILITIES.find((a) => a.id === abilityId);
-    const st = this.crewState[abilityId];
-    if (!spec || !st || st.cooldownTimer > 0) return false;
-
-    st.activeTimer = spec.duration;
-    st.cooldownTimer = spec.cooldown;
-
-    if (abilityId === 'blackout') {
-      const jammed = context.police.triggerBlackout(context.player.pos, spec.duration);
-      this.showDialogue('Nadia Vale', 'NETRUNNER', `Signal Blackout live! ${jammed} SBPD cruisers stalled and dispatch jammed.`, 4.5);
-      if (context.showToast) context.showToast('NADIA: SIGNAL BLACKOUT ACTIVE');
-    } else if (abilityId === 'nitro') {
-      if (context.player.vehicle) {
-        context.player.vehicle.nitro = 100;
-        context.player.vehicle.health = Math.min(context.player.vehicle.maxHealth, context.player.vehicle.health + 55);
-        context.cameraRig.punchFov(8);
-      } else {
-        context.player.armor = Math.min(context.player.maxArmor, context.player.armor + 35);
-      }
-      this.showDialogue('Rico Vega', 'WHEELMAN', 'Overdrive engaged — full nitro surge and quick chassis patch!', 4.2);
-      if (context.showToast) context.showToast('RICO: NITRO OVERDRIVE ENGAGED');
-    } else if (abilityId === 'focus') {
-      this.showDialogue('Tessa Vance', 'TACTICIAN', 'Tactical Focus online — breathing steady, +50% weapon impact.', 4.2);
-      if (context.showToast) context.showToast('TESSA: TACTICAL FOCUS (SLOW-MO)');
-    }
-
-    if (context.audio) context.audio.playAbility(abilityId);
-    return true;
-  }
-
-  applyGaragePaint(paintId, player, audio) {
-    const paint = GARAGE_PAINTS.find((p) => p.id === paintId);
-    if (!paint) return false;
-    if (!this.ownedPaints.has(paintId)) {
-      if (player.cash < paint.price) return false;
-      player.cash -= paint.price;
-      this.ownedPaints.add(paintId);
-    }
-    this.activePaintId = paintId;
-    if (player.vehicle) player.vehicle.setPaint(paint.color);
-    if (audio) audio.playPickup();
-    return true;
-  }
-
-  buyGarageUpgrade(upgradeId, player, audio) {
-    const upg = GARAGE_UPGRADES.find((u) => u.id === upgradeId);
-    if (!upg) return false;
-    const tier = this.upgrades[upgradeId] || 0;
-    if (tier >= upg.maxTier) return false;
-    const cost = upg.baseCost * (tier + 1);
-    if (player.cash < cost) return false;
-    player.cash -= cost;
-    this.upgrades[upgradeId] = tier + 1;
-    if (player.vehicle) player.vehicle.applyGarageUpgrades(this.upgrades);
-    if (audio) audio.playMissionComplete();
-    return true;
   }
 
   onEnemyKilled(enemy, context) {
@@ -250,12 +201,7 @@ export class MissionDirector {
   update(dt, context) {
     const { player, cityProps, police, audio } = context;
 
-    // Tick crew timers
-    for (const ab of CREW_ABILITIES) {
-      const st = this.crewState[ab.id];
-      if (st.activeTimer > 0) st.activeTimer = Math.max(0, st.activeTimer - dt);
-      if (st.cooldownTimer > 0) st.cooldownTimer = Math.max(0, st.cooldownTimer - dt);
-    }
+    this.crew.updateCrewCooldowns(dt);
 
     if (this.dialogueTimer > 0) {
       this.dialogueTimer -= dt;
@@ -275,8 +221,7 @@ export class MissionDirector {
     }
 
     // Garage proximity check
-    const gDist = Math.hypot(player.pos.x - CITY_CONFIG.garagePos.x, player.pos.z - CITY_CONFIG.garagePos.z);
-    this.nearGarage = gDist < 14;
+    this.garage.updateGarageProximity(player.pos);
 
     // Active Mission objectives
     const m = this.currentMission;
@@ -331,9 +276,8 @@ export class MissionDirector {
       completedMissions: Array.from(this.completedMissions),
       collectedPalms: Array.from(this.collectedPalms),
       raceWins: this.raceWins,
-      ownedPaints: Array.from(this.ownedPaints),
-      activePaintId: this.activePaintId,
-      upgrades: { ...this.upgrades },
+      freeRoamMode: this.freeRoamMode,
+      ...this.garage.serializeGarageState(),
     };
   }
 
@@ -342,14 +286,13 @@ export class MissionDirector {
     this.completedMissions = new Set(data.completedMissions || []);
     this.collectedPalms = new Set(data.collectedPalms || []);
     this.raceWins = data.raceWins || 0;
-    this.ownedPaints = new Set(data.ownedPaints || ['sunset_coral']);
-    this.activePaintId = data.activePaintId || 'sunset_coral';
-    this.upgrades = { engine: 0, handling: 0, armor: 0, nitro: 0, ...(data.upgrades || {}) };
+    this.freeRoamMode = Boolean(data.freeRoamMode);
+    this.garage.deserializeGarageState(data);
     const idx = Math.min(MISSIONS.length, data.activeMissionIndex ?? 0);
-    if (idx < MISSIONS.length) {
+    if (!this.freeRoamMode && idx < MISSIONS.length) {
       this.startMission(idx, context, true);
     } else {
-      this.activeMissionIndex = MISSIONS.length;
+      this.activeMissionIndex = idx;
     }
   }
 }

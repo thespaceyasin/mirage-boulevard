@@ -116,15 +116,15 @@ export function buildSolaraBayCity(scene, roadNetwork) {
         vec3 L = normalize(uSunDir);
         vec3 H = normalize(L + V);
 
-        float fres = pow(1.0 - max(dot(N, V), 0.0), 3.2);
-        float spec = pow(max(dot(N, H), 0.0), 96.0) * 1.8 + pow(max(dot(N, H), 0.0), 18.0) * 0.32;
+        float fres = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+        float spec = pow(max(dot(N, H), 0.0), 82.0) * 2.25 + pow(max(dot(N, H), 0.0), 14.0) * 0.45;
 
-        // Animated shoreline foam
+        // Animated shoreline foam & warm sunset sun-path shimmer
         float foamWave = sin(vWorldPos.z * 0.28 + uTime * 2.4) * 1.8;
         float foam = (1.0 - smoothstep(0.0, 6.5, (vWorldPos.x - 156.0) + foamWave)) * 0.85;
-        vec3 col = waterCol + vec3(0.18, 0.36, 0.48) * fres * (1.0 - uNight * 0.5);
-        col += uSunColor * spec * mix(1.2, 0.45, uNight);
-        col = mix(col, vec3(0.95, 0.98, 1.0), clamp(foam, 0.0, 0.9) * (1.0 - uNight * 0.55));
+        vec3 col = waterCol + vec3(0.24, 0.42, 0.54) * fres * (1.0 - uNight * 0.5);
+        col += uSunColor * spec * mix(1.45, 0.5, uNight);
+        col = mix(col, vec3(0.96, 0.98, 1.0), clamp(foam, 0.0, 0.9) * (1.0 - uNight * 0.55));
         gl_FragColor = vec4(col, 1.0);
       }
     `,
@@ -138,24 +138,27 @@ export function buildSolaraBayCity(scene, roadNetwork) {
   // ---------------- 3. ROADS & ZEBRA INTERSECTIONS ----------------
   const roadMatNS = new THREE.MeshStandardMaterial({
     map: roadTex.road.clone(),
-    roughness: 0.78,
-    metalness: 0.06,
+    roughness: 0.44,
+    metalness: 0.14,
+    envMapIntensity: 1.5,
   });
   roadMatNS.map.repeat.set(1, 22);
   roadMatNS.map.needsUpdate = true;
 
   const roadMatEW = new THREE.MeshStandardMaterial({
     map: roadTex.road.clone(),
-    roughness: 0.78,
-    metalness: 0.06,
+    roughness: 0.44,
+    metalness: 0.14,
+    envMapIntensity: 1.5,
   });
   roadMatEW.map.repeat.set(1, 16);
   roadMatEW.map.needsUpdate = true;
 
   const interMat = new THREE.MeshStandardMaterial({
     map: roadTex.intersection,
-    roughness: 0.78,
-    metalness: 0.06,
+    roughness: 0.44,
+    metalness: 0.14,
+    envMapIntensity: 1.5,
   });
 
   // North-South Avenues
@@ -397,12 +400,44 @@ export function buildSolaraBayCity(scene, roadNetwork) {
     }
   }
 
-  // Far outer skyline backdrop rings (West, North, South) for dramatic horizon depth
+  // Far outer skyline backdrop rings + distant high-rise horizon silhouettes & coastal bridge
   for (let i = -3; i <= 3; i += 1) {
     addBuilding(-224, i * 62, 24, 34, rng.range(16, 32), i < 0 ? 'villa' : 'industrial', 'palm_heights', false);
     addBuilding(i * 44 - 55, -224, 28, 22, rng.range(24, 48), i >= 0 ? 'downtown' : 'villa', 'saffron_downtown', i === 1);
     addBuilding(i * 44 - 55, 224, 28, 22, rng.range(16, 30), i >= 0 ? 'market' : 'industrial', 'lantern_market', i >= 0);
   }
+
+  // Distant atmospheric skyline silhouettes beyond the south marina & north headland
+  const horizonSilhouettes = [
+    { x: 54, z: 266, w: 22, d: 20, h: 68 },
+    { x: 24, z: 274, w: 26, d: 22, h: 86 },
+    { x: -10, z: 282, w: 24, d: 22, h: 74 },
+    { x: 82, z: 278, w: 20, d: 18, h: 54 },
+    { x: 112, z: 286, w: 18, d: 18, h: 44 },
+    { x: 58, z: -270, w: 26, d: 22, h: 78 },
+    { x: 22, z: -278, w: 28, d: 24, h: 92 },
+    { x: -20, z: -274, w: 24, d: 20, h: 64 },
+  ];
+  const skylineInst = new THREE.InstancedMesh(
+    boxGeo,
+    new THREE.MeshStandardMaterial({ color: 0x3b4866, roughness: 0.75, metalness: 0.25 }),
+    horizonSilhouettes.length,
+  );
+  for (let i = 0; i < horizonSilhouettes.length; i += 1) {
+    const hs = horizonSilhouettes[i];
+    instDummy.position.set(hs.x, hs.h * 0.5, hs.z);
+    instDummy.rotation.set(0, 0, 0);
+    instDummy.scale.set(hs.w, hs.h, hs.d);
+    instDummy.updateMatrix();
+    skylineInst.setMatrixAt(i, instDummy.matrix);
+    crownEntries.push({
+      x: hs.x, y: hs.h + 5, z: hs.z,
+      sx: hs.w * 0.45, sy: 10, sz: hs.d * 0.45,
+      hex: 0x46526f,
+    });
+  }
+  skylineInst.instanceMatrix.needsUpdate = true;
+  cityGroup.add(skylineInst);
 
   // Finalize instanced crowns & rooftop neon strips (2 draw calls instead of ~180!)
   const crownInst = new THREE.InstancedMesh(boxGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.82, metalness: 0.14 }), crownEntries.length);

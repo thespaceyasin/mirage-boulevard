@@ -1,6 +1,7 @@
-// Pooled soft-gradient sprite & 3D particle VFX system:
-// cinematic fireballs, billowing dark smoke plumes, burning vehicle flames,
-// drift tire smoke, metallic sparks, muzzle flashes, glowing tracers, and shockwave rings.
+// Multi-layered pooled 3D particle & debris VFX system:
+// clustered orange-gold fireball plumes, billowing charcoal smoke columns,
+// streaking ember sparks, tumbling charred debris chunks, dual-tire drift smoke,
+// muzzle flashes, glowing tracers, and fiery ground shockwave rings.
 
 import * as THREE from 'three';
 import { createSeededRng } from '../engine/gameConfig.js';
@@ -19,44 +20,87 @@ function createSoftRadialTexture(stops) {
   return tex;
 }
 
+function createBillowTexture(innerCol, midCol, edgeCol) {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 128;
+  const ctx = c.getContext('2d');
+  // Soft overlapping feathered puffs with smooth alpha falloff so plumes blend organically
+  const lobes = [
+    [64, 64, 58],
+    [48, 56, 40],
+    [80, 58, 38],
+    [62, 44, 36],
+    [64, 78, 36],
+  ];
+  for (const [lx, ly, lr] of lobes) {
+    const g = ctx.createRadialGradient(lx, ly, 2, lx, ly, lr);
+    g.addColorStop(0.0, innerCol);
+    g.addColorStop(0.38, midCol);
+    g.addColorStop(0.76, edgeCol.replace('0.0)', '0.16)'));
+    g.addColorStop(1.0, edgeCol);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(lx, ly, lr, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 export class VfxSystem {
   constructor(scene) {
     this.scene = scene;
     this.rng = createSeededRng(55109);
     this.particles = [];
+    this.debris = [];
     this.tracers = [];
     this.rings = [];
 
-    this._fireTex = createSoftRadialTexture([
-      [0.0, 'rgba(255, 252, 224, 1.0)'],
-      [0.28, 'rgba(255, 196, 72, 0.95)'],
-      [0.6, 'rgba(255, 86, 24, 0.68)'],
+    this._fireCoreTex = createSoftRadialTexture([
+      [0.0, 'rgba(255, 250, 200, 1.0)'],
+      [0.35, 'rgba(255, 175, 52, 0.92)'],
+      [0.72, 'rgba(255, 76, 18, 0.45)'],
       [1.0, 'rgba(180, 20, 8, 0.0)'],
     ]);
-    this._smokeTex = createSoftRadialTexture([
-      [0.0, 'rgba(42, 46, 56, 0.85)'],
-      [0.52, 'rgba(34, 38, 46, 0.56)'],
-      [1.0, 'rgba(24, 28, 36, 0.0)'],
-    ]);
-    this._driftTex = createSoftRadialTexture([
-      [0.0, 'rgba(240, 244, 252, 0.62)'],
-      [0.55, 'rgba(218, 226, 238, 0.32)'],
-      [1.0, 'rgba(200, 210, 225, 0.0)'],
-    ]);
+    // Multi-lobe non-additive fireball puff so overlapping clusters stay rich orange/gold/crimson
+    this._fireCloudTex = createBillowTexture(
+      'rgba(255, 218, 86, 0.92)',
+      'rgba(255, 92, 20, 0.82)',
+      'rgba(120, 22, 8, 0.0)',
+    );
+    this._smokeTex = createBillowTexture(
+      'rgba(32, 34, 42, 0.88)',
+      'rgba(24, 26, 34, 0.62)',
+      'rgba(18, 20, 26, 0.0)',
+    );
+    this._driftTex = createBillowTexture(
+      'rgba(244, 246, 252, 0.68)',
+      'rgba(220, 228, 240, 0.34)',
+      'rgba(200, 210, 225, 0.0)',
+    );
     this._sparkTex = createSoftRadialTexture([
-      [0.0, 'rgba(255, 255, 230, 1.0)'],
-      [0.4, 'rgba(255, 195, 70, 0.9)'],
-      [1.0, 'rgba(255, 100, 20, 0.0)'],
+      [0.0, 'rgba(255, 255, 220, 1.0)'],
+      [0.4, 'rgba(255, 185, 56, 0.95)'],
+      [1.0, 'rgba(255, 84, 16, 0.0)'],
     ]);
 
     this._ringGeo = new THREE.RingGeometry(0.72, 1.0, 28);
     this._ringGeo.rotateX(-Math.PI / 2);
+    this._debrisGeo = new THREE.BoxGeometry(0.32, 0.16, 0.42);
+    this._debrisMat = new THREE.MeshStandardMaterial({
+      color: 0x1c1816,
+      emissive: new THREE.Color(0xff5a18),
+      emissiveIntensity: 0.95,
+      roughness: 0.78,
+    });
 
-    // Pre-allocate pooled Sprite particles (zero runtime geometry/material churn!)
+    // Pre-allocate pooled Sprite particles
     this._pool = [];
-    for (let i = 0; i < 240; i += 1) {
+    for (let i = 0; i < 280; i += 1) {
       const mat = new THREE.SpriteMaterial({
-        map: this._fireTex,
+        map: this._fireCoreTex,
         transparent: true,
         opacity: 1,
         depthWrite: false,
@@ -102,71 +146,91 @@ export class VfxSystem {
   }
 
   spawnExplosion(pos, strength = 1.0) {
-    // Blazing incandescent inner core flash
+    // 1. Compact incandescent ignition core
     this._pushSprite({
       x: pos.x,
-      y: pos.y + 1.5,
+      y: pos.y + 1.0,
       z: pos.z,
       vx: 0,
-      vy: 1.5,
+      vy: 1.0,
       vz: 0,
-      scale0: 3.4 * strength,
-      scale1: 9.2 * strength,
-      life: 0.42,
-      tex: this._fireTex,
+      scale0: 2.2 * strength,
+      scale1: 4.4 * strength,
+      life: 0.32,
+      tex: this._fireCoreTex,
       additive: true,
-      opacity: 1.0,
+      opacity: 0.95,
     });
 
-    // Rolling fiery blast cloud
-    for (let i = 0; i < 18; i += 1) {
-      const a = this.rng.range(0, Math.PI * 2);
-      const spd = this.rng.range(1.6, 8.2) * strength;
+    // 2. Clustered billowing orange-gold-crimson fireball tongues
+    for (let i = 0; i < 12; i += 1) {
+      const a = (i / 12) * Math.PI * 2 + this.rng.range(-0.3, 0.3);
+      const rad = this.rng.range(0.35, 1.65) * strength;
+      const spd = this.rng.range(1.0, 4.2) * strength;
       this._pushSprite({
-        x: pos.x + Math.cos(a) * 1.1,
-        y: pos.y + this.rng.range(0.6, 2.4),
-        z: pos.z + Math.sin(a) * 1.1,
+        x: pos.x + Math.cos(a) * rad,
+        y: pos.y + this.rng.range(0.55, 2.2) * strength,
+        z: pos.z + Math.sin(a) * rad,
         vx: Math.cos(a) * spd,
-        vy: this.rng.range(2.4, 8.6) * strength,
+        vy: this.rng.range(2.0, 5.4) * strength,
         vz: Math.sin(a) * spd,
-        scale0: this.rng.range(2.2, 3.8) * strength,
-        scale1: this.rng.range(5.2, 8.0) * strength,
-        life: this.rng.range(0.45, 0.92),
-        gravity: -2.4,
-        tex: this._fireTex,
-        additive: true,
-        opacity: 0.92,
+        scale0: this.rng.range(1.9, 3.0) * strength,
+        scale1: this.rng.range(3.2, 4.6) * strength,
+        life: this.rng.range(0.48, 0.9),
+        gravity: -1.6,
+        tex: this._fireCloudTex,
+        additive: i % 3 === 0,
+        opacity: i % 3 === 0 ? 0.52 : 0.78,
       });
     }
 
-    // Thick billowing charcoal smoke column rising ABOVE the fireball so fire stays blazing bright!
+    // 3. Dense billowing charcoal smoke column rising above & around the fire cluster
     for (let i = 0; i < 14; i += 1) {
       const a = this.rng.range(0, Math.PI * 2);
-      const spd = this.rng.range(0.8, 4.0) * strength;
+      const rad = this.rng.range(0.8, 2.6) * strength;
+      const spd = this.rng.range(0.7, 3.2) * strength;
       this._pushSprite({
-        x: pos.x + Math.cos(a) * 1.4,
-        y: pos.y + this.rng.range(3.4, 5.6),
-        z: pos.z + Math.sin(a) * 1.4,
+        x: pos.x + Math.cos(a) * rad,
+        y: pos.y + this.rng.range(2.4, 5.2) * strength,
+        z: pos.z + Math.sin(a) * rad,
         vx: Math.cos(a) * spd,
-        vy: this.rng.range(3.6, 8.2) * strength,
+        vy: this.rng.range(3.2, 7.2) * strength,
         vz: Math.sin(a) * spd,
-        scale0: 2.5 * strength,
-        scale1: 6.8 * strength,
-        life: this.rng.range(1.1, 1.9),
-        gravity: 1.2,
+        scale0: this.rng.range(2.0, 3.0) * strength,
+        scale1: this.rng.range(4.4, 6.4) * strength,
+        life: this.rng.range(1.1, 1.85),
+        gravity: 1.1,
         tex: this._smokeTex,
         additive: false,
-        opacity: 0.72,
+        opacity: 0.84,
       });
     }
 
-    this.spawnSparks(pos.x, pos.y + 1.5, pos.z, 26, 17 * strength);
+    // 4. High-velocity bright sparks + tumbling charred 3D debris fragments
+    this.spawnSparks(pos.x, pos.y + 1.4, pos.z, 28, 16 * strength);
+    for (let i = 0; i < 8; i += 1) {
+      const a = (i / 8) * Math.PI * 2 + this.rng.range(-0.3, 0.3);
+      const spd = this.rng.range(5, 13) * strength;
+      const chunk = new THREE.Mesh(this._debrisGeo, this._debrisMat);
+      chunk.position.set(pos.x + Math.cos(a) * 0.8, pos.y + 1.1, pos.z + Math.sin(a) * 0.8);
+      chunk.scale.setScalar(this.rng.range(0.7, 1.35));
+      this.scene.add(chunk);
+      this.debris.push({
+        mesh: chunk,
+        vx: Math.cos(a) * spd,
+        vy: this.rng.range(5.5, 11.5) * strength,
+        vz: Math.sin(a) * spd,
+        rx: this.rng.range(-9, 9),
+        ry: this.rng.range(-9, 9),
+        life: this.rng.range(0.9, 1.5),
+      });
+    }
 
-    // Expanding fiery ground shockwave ring
+    // 5. Fiery ground shockwave ring
     const ring = new THREE.Mesh(
       this._ringGeo,
       new THREE.MeshBasicMaterial({
-        color: 0xff9b42,
+        color: 0xff8c32,
         side: THREE.DoubleSide,
         transparent: true,
         opacity: 0.85,
@@ -177,37 +241,37 @@ export class VfxSystem {
     ring.position.set(pos.x, pos.y + 0.16, pos.z);
     ring.scale.setScalar(1.0);
     this.scene.add(ring);
-    this.rings.push({ mesh: ring, life: 0.5, maxLife: 0.5, maxScale: 13 * strength });
+    this.rings.push({ mesh: ring, life: 0.5, maxLife: 0.5, maxScale: 12 * strength });
   }
 
   spawnFirePlume(x, y, z, scale = 1.0) {
     this._pushSprite({
-      x: x + this.rng.range(-0.7, 0.7),
-      y: y + this.rng.range(-0.1, 0.5),
-      z: z + this.rng.range(-0.7, 0.7),
-      vx: this.rng.range(-0.6, 0.6),
-      vy: this.rng.range(2.8, 5.8),
-      vz: this.rng.range(-0.6, 0.6),
-      scale0: 2.4 * scale,
-      scale1: 4.5 * scale,
-      life: 0.52,
-      tex: this._fireTex,
-      additive: true,
-      opacity: 0.94,
+      x: x + this.rng.range(-0.85, 0.85),
+      y: y + this.rng.range(0.0, 0.8),
+      z: z + this.rng.range(-0.85, 0.85),
+      vx: this.rng.range(-0.7, 0.7),
+      vy: this.rng.range(2.6, 5.2),
+      vz: this.rng.range(-0.7, 0.7),
+      scale0: 1.7 * scale,
+      scale1: 3.1 * scale,
+      life: 0.55,
+      tex: this._fireCloudTex,
+      additive: false,
+      opacity: 0.92,
     });
     this._pushSprite({
-      x: x + this.rng.range(-0.8, 0.8),
-      y: y + 2.8,
-      z: z + this.rng.range(-0.8, 0.8),
-      vx: this.rng.range(-1.0, 1.0),
-      vy: this.rng.range(3.6, 6.4),
-      vz: this.rng.range(-1.0, 1.0),
-      scale0: 2.3 * scale,
-      scale1: 5.8 * scale,
-      life: 1.1,
+      x: x + this.rng.range(-0.9, 0.9),
+      y: y + 2.2,
+      z: z + this.rng.range(-0.9, 0.9),
+      vx: this.rng.range(-1.1, 1.1),
+      vy: this.rng.range(3.4, 6.2),
+      vz: this.rng.range(-1.1, 1.1),
+      scale0: 1.9 * scale,
+      scale1: 4.5 * scale,
+      life: 1.15,
       tex: this._smokeTex,
       additive: false,
-      opacity: 0.68,
+      opacity: 0.78,
     });
   }
 
@@ -219,29 +283,29 @@ export class VfxSystem {
       vx: this.rng.range(-0.6, 0.6),
       vy: this.rng.range(2.0, 3.6),
       vz: this.rng.range(-0.6, 0.6),
-      scale0: 1.5 * scale,
-      scale1: 3.8 * scale,
+      scale0: 1.4 * scale,
+      scale1: 3.6 * scale,
       life: 0.85,
       tex: this._smokeTex,
       additive: false,
-      opacity: 0.62,
+      opacity: 0.68,
     });
   }
 
   spawnDriftSmoke(x, y, z) {
     this._pushSprite({
-      x: x + this.rng.range(-0.6, 0.6),
-      y: y + 0.3,
-      z: z + this.rng.range(-0.6, 0.6),
-      vx: this.rng.range(-0.8, 0.8),
-      vy: this.rng.range(0.5, 1.6),
-      vz: this.rng.range(-0.8, 0.8),
-      scale0: 1.4,
-      scale1: 3.9,
-      life: 0.68,
+      x: x + this.rng.range(-0.35, 0.35),
+      y: y + 0.18,
+      z: z + this.rng.range(-0.35, 0.35),
+      vx: this.rng.range(-0.6, 0.6),
+      vy: this.rng.range(0.45, 1.3),
+      vz: this.rng.range(-0.6, 0.6),
+      scale0: 0.85,
+      scale1: 2.1,
+      life: 0.62,
       tex: this._driftTex,
       additive: false,
-      opacity: 0.56,
+      opacity: 0.44,
     });
   }
 
@@ -254,12 +318,12 @@ export class VfxSystem {
         y,
         z,
         vx: Math.cos(a) * s,
-        vy: this.rng.range(2.6, speed * 0.8),
+        vy: this.rng.range(2.8, speed * 0.85),
         vz: Math.sin(a) * s,
-        scale0: 0.72,
+        scale0: 0.68,
         scale1: 0.16,
-        life: this.rng.range(0.24, 0.54),
-        gravity: -18,
+        life: this.rng.range(0.28, 0.62),
+        gravity: -16,
         tex: this._sparkTex,
         additive: true,
         opacity: 1.0,
@@ -278,7 +342,7 @@ export class VfxSystem {
       scale0: scale,
       scale1: scale * 0.2,
       life: 0.08,
-      tex: this._fireTex,
+      tex: this._fireCoreTex,
       additive: true,
       opacity: 1.0,
     });
@@ -287,7 +351,7 @@ export class VfxSystem {
   spawnTracer(startPos, endPos, colorHex = 0xffd27a, life = 0.09) {
     const dir = endPos.clone().sub(startPos);
     const len = Math.max(0.2, dir.length());
-    const geo = new THREE.BoxGeometry(0.075, 0.075, len);
+    const geo = new THREE.BoxGeometry(0.08, 0.08, len);
     const mat = new THREE.MeshBasicMaterial({
       color: colorHex,
       transparent: true,
@@ -320,6 +384,22 @@ export class VfxSystem {
       const sc = p.scale0 + (p.scale1 - p.scale0) * t;
       p.sprite.scale.set(sc, sc, 1);
       p.sprite.material.opacity = p.baseOpacity * (1 - t);
+    }
+
+    for (let i = this.debris.length - 1; i >= 0; i -= 1) {
+      const d = this.debris[i];
+      d.life -= dt;
+      if (d.life <= 0) {
+        this.scene.remove(d.mesh);
+        this.debris.splice(i, 1);
+        continue;
+      }
+      d.vy -= 22 * dt;
+      d.mesh.position.x += d.vx * dt;
+      d.mesh.position.y = Math.max(0.12, d.mesh.position.y + d.vy * dt);
+      d.mesh.position.z += d.vz * dt;
+      d.mesh.rotation.x += d.rx * dt;
+      d.mesh.rotation.y += d.ry * dt;
     }
 
     for (let i = this.tracers.length - 1; i >= 0; i -= 1) {

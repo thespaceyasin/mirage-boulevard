@@ -4,7 +4,7 @@
 [![Rank](https://make.fun/badge/gta6-01/thespaceyasin/mirage-boulevard/rank.svg)](https://make.fun/c/gta6-01)
 [![Reward](https://make.fun/badge/gta6-01/thespaceyasin/mirage-boulevard/reward.svg)](https://make.fun/c/gta6-01)
 
-An original, 100% offline 3D open-world coastal crime action game built for the [make.fun `gta6-01`](https://make.fun/c/gta6-01) bounty. Runs directly in desktop Chrome from static files under `game/` with zero external network requests, procedural Canvas2D PBR textures, custom GLSL ocean & sky shaders, and procedural Web Audio sound & multi-station radio.
+An original, 100% offline 3D open-world coastal crime action game built for the [make.fun `gta6-01`](https://make.fun/bounty/gta6-01) bounty (`https://make.fun/bounty/gta6-01`). Runs directly in desktop Chrome from static files under `game/` with zero external network requests, sculpted `ExtrudeGeometry` vehicles, procedural Canvas2D PBR textures, custom GLSL ocean & sky shaders, and procedural Web Audio sound & multi-station radio.
 
 ![MIRAGE BOULEVARD Cover — Golden Hour Coastal Chase](screenshots/1-chase.jpg)
 
@@ -25,9 +25,9 @@ An original, 100% offline 3D open-world coastal crime action game built for the 
 
 ## Screenshots
 
-| Neon Night Market Shootout | Sun-Soaked City & Carjacking | Interactive City Map & Save Dashboard |
+| Neon Night Market Shootout & Carjacking | Interactive City Map, Crew & Save Dashboard | Cinematic Main Menu & Coastal Panorama |
 | :---: | :---: | :---: |
-| ![Combat](screenshots/2-combat.jpg) | ![City](screenshots/3-city.jpg) | ![Dashboard](screenshots/4-dashboard.jpg) |
+| ![Combat](screenshots/2-combat.jpg) | ![Dashboard](screenshots/3-dashboard.jpg) | ![Title](screenshots/4-title.jpg) |
 
 ## Controls
 
@@ -69,9 +69,9 @@ game/
     ├── engine/                 # gameConfig.js, rendererPipeline.js, cameraInput.js
     ├── world/                  # proceduralTextures.js, roadNetwork.js, cityBuilder.js, cityProps.js
     ├── entities/               # vehicleFactory.js, vehiclePhysics.js, characterRig.js
-    ├── systems/                # trafficSystem.js, combatSystem.js, policeDispatch.js, missionDirector.js, vfxSystem.js, saveManager.js
+    ├── systems/                # trafficSystem.js, combatSystem.js, policeDispatch.js, missionDirector.js, crewSystem.js, garageShop.js, vfxSystem.js, saveManager.js
     ├── audio/                  # audioEngine.js (Web Audio SFX + 4-station procedural radio)
-    └── ui/                     # hudDashboard.js (HUD, minimap, Garage, Interactive City Map)
+    └── ui/                     # titleMenu.js, hudDashboard.js (Main Menu, HUD, minimap & Interactive City Map)
 ```
 
 ## License

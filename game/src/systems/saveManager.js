@@ -39,6 +39,17 @@ export class SaveManager {
     return Object.keys(all).length > 0;
   }
 
+  getBestCareerPercent() {
+    const all = this._readAll();
+    let best = 0;
+    for (const rec of Object.values(all)) {
+      if (rec && typeof rec.careerPct === 'number') {
+        best = Math.max(best, rec.careerPct);
+      }
+    }
+    return best;
+  }
+
   listSlots() {
     const all = this._readAll();
     return SAVE_SLOTS.map((s) => ({

@@ -1,6 +1,6 @@
 [
   { "name": "1-chase.jpg", "query": "?shot=chase" },
   { "name": "2-combat.jpg", "query": "?shot=combat" },
-  { "name": "3-city.jpg", "query": "?shot=city" },
-  { "name": "4-dashboard.jpg", "query": "?shot=dashboard" }
+  { "name": "3-dashboard.jpg", "query": "?shot=dashboard" },
+  { "name": "4-title.jpg", "query": "?shot=title" }
 ]

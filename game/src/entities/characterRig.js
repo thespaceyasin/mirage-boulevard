@@ -1,6 +1,6 @@
 // Sculpted articulated 3D character factory (protagonist Mateo Cruz, pedestrians,
-// Meridian Cartel gunmen, SBPD SWAT officers) using smooth capsules/cylinders,
-// styled silhouettes, procedural walk/sprint/aim animation, and detailed 3D weapons.
+// Meridian Cartel gunmen, SBPD SWAT officers) with tailored jackets, collars,
+// forearms, footwear, tactical vests/helmets, and distinct high-contrast 3D weapons.
 
 import * as THREE from 'three';
 import { WEAPON_SPECS } from '../engine/gameConfig.js';
@@ -10,22 +10,31 @@ let charShared = null;
 function getCharShared() {
   if (charShared) return charShared;
   charShared = {
-    torsoGeo: new THREE.CylinderGeometry(0.27, 0.22, 0.66, 10),
-    pelvisGeo: new THREE.CylinderGeometry(0.22, 0.21, 0.22, 10),
-    headGeo: new THREE.SphereGeometry(0.18, 12, 10),
-    hairGeo: new THREE.SphereGeometry(0.195, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.56),
-    shoulderGeo: new THREE.SphereGeometry(0.11, 8, 8),
-    armGeo: new THREE.CapsuleGeometry(0.085, 0.42, 6, 8),
-    legGeo: new THREE.CapsuleGeometry(0.1, 0.52, 6, 8),
-    shadeGeo: new THREE.BoxGeometry(0.3, 0.075, 0.08),
-    gunMetal: new THREE.MeshStandardMaterial({ color: 0x1e2534, roughness: 0.3, metalness: 0.88 }),
-    gunTrim: new THREE.MeshStandardMaterial({ color: 0x4b576d, roughness: 0.42, metalness: 0.72 }),
-    rpgAccent: new THREE.MeshStandardMaterial({ color: 0x3b5e40, roughness: 0.5, metalness: 0.35 }),
+    torsoGeo: new THREE.CylinderGeometry(0.28, 0.21, 0.64, 12),
+    pelvisGeo: new THREE.CylinderGeometry(0.21, 0.2, 0.22, 10),
+    collarGeo: new THREE.CylinderGeometry(0.18, 0.22, 0.12, 10, 1, true),
+    beltGeo: new THREE.BoxGeometry(0.44, 0.08, 0.31),
+    headGeo: new THREE.SphereGeometry(0.18, 14, 12),
+    hairGeo: new THREE.SphereGeometry(0.198, 12, 9, 0, Math.PI * 2, 0, Math.PI * 0.58),
+    helmetGeo: new THREE.SphereGeometry(0.215, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.62),
+    shoulderGeo: new THREE.SphereGeometry(0.115, 10, 8),
+    upperArmGeo: new THREE.CapsuleGeometry(0.082, 0.2, 6, 8),
+    forearmGeo: new THREE.CapsuleGeometry(0.068, 0.2, 6, 8),
+    handGeo: new THREE.SphereGeometry(0.072, 8, 8),
+    legGeo: new THREE.CapsuleGeometry(0.095, 0.48, 6, 8),
+    shoeGeo: new THREE.BoxGeometry(0.15, 0.11, 0.28),
+    shadeGeo: new THREE.BoxGeometry(0.3, 0.072, 0.08),
+    gunMetal: new THREE.MeshStandardMaterial({ color: 0x1a212e, roughness: 0.28, metalness: 0.9 }),
+    gunTrim: new THREE.MeshStandardMaterial({ color: 0x62708a, roughness: 0.36, metalness: 0.78 }),
+    gunWood: new THREE.MeshStandardMaterial({ color: 0x6e472b, roughness: 0.65, metalness: 0.1 }),
+    rpgAccent: new THREE.MeshStandardMaterial({ color: 0x3b5e40, roughness: 0.48, metalness: 0.35 }),
+    shoeMat: new THREE.MeshStandardMaterial({ color: 0x171a22, roughness: 0.75, metalness: 0.1 }),
     shadowGeo: new THREE.CircleGeometry(0.56, 14),
-    shadowMat: new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.36, depthWrite: false }),
+    shadowMat: new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.38, depthWrite: false }),
   };
-  charShared.armGeo.translate(0, -0.25, 0);
-  charShared.legGeo.translate(0, -0.32, 0);
+  charShared.upperArmGeo.translate(0, -0.14, 0);
+  charShared.forearmGeo.translate(0, -0.36, 0);
+  charShared.legGeo.translate(0, -0.3, 0);
   charShared.shadowGeo.rotateX(-Math.PI / 2);
   return charShared;
 }
@@ -33,45 +42,55 @@ function getCharShared() {
 function buildWeaponMesh(id, s) {
   const g = new THREE.Group();
   if (id === 'pistol') {
-    const slide = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.09, 0.32), s.gunMetal);
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.14, 0.08), s.gunTrim);
-    grip.position.set(0, -0.08, -0.08);
-    g.add(slide, grip);
+    const slide = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.1, 0.36), s.gunTrim);
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.06, 0.3), s.gunMetal);
+    frame.position.set(0, -0.05, 0.01);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.16, 0.09), s.gunMetal);
+    grip.position.set(0, -0.1, -0.09);
+    grip.rotation.x = -0.15;
+    g.add(slide, frame, grip);
   } else if (id === 'smg') {
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.13, 0.46), s.gunMetal);
-    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.22, 0.07), s.gunTrim);
-    mag.position.set(0, -0.14, 0.08);
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.18, 6), s.gunTrim);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 0.54), s.gunMetal);
+    const shroud = new THREE.Mesh(new THREE.BoxGeometry(0.105, 0.06, 0.48), s.gunTrim);
+    shroud.position.y = 0.05;
+    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.28, 0.08), s.gunTrim);
+    mag.position.set(0, -0.17, 0.1);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.24, 8), s.gunTrim);
     barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0.02, 0.3);
-    g.add(body, mag, barrel);
+    barrel.position.set(0, 0.02, 0.36);
+    g.add(body, shroud, mag, barrel);
   } else if (id === 'shotgun') {
-    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.32), s.gunTrim);
-    stock.position.z = -0.18;
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.036, 0.68, 8), s.gunMetal);
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.14, 0.38), s.gunWood);
+    stock.position.z = -0.22;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.14, 0.34), s.gunMetal);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.042, 0.78, 8), s.gunTrim);
     barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0.03, 0.24);
-    const pump = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.08, 0.24), s.gunTrim);
-    pump.position.set(0, -0.02, 0.28);
-    g.add(stock, barrel, pump);
+    barrel.position.set(0, 0.04, 0.32);
+    const pump = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.09, 0.28), s.gunWood);
+    pump.position.set(0, -0.03, 0.34);
+    g.add(stock, body, barrel, pump);
   } else if (id === 'carbine') {
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.14, 0.56), s.gunMetal);
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.42, 8), s.gunTrim);
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.15, 0.32), s.gunMetal);
+    stock.position.set(0, -0.01, -0.28);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.16, 0.64), s.gunMetal);
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.095, 0.05, 0.56), s.gunTrim);
+    rail.position.set(0, 0.09, 0.04);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.034, 0.56, 8), s.gunTrim);
     barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0.02, 0.44);
-    const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.18, 8), s.gunTrim);
+    barrel.position.set(0, 0.02, 0.56);
+    const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.042, 0.24, 8), s.gunTrim);
     scope.rotation.x = Math.PI / 2;
-    scope.position.set(0, 0.11, 0.02);
-    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.22, 0.08), s.gunMetal);
-    mag.position.set(0, -0.14, 0.12);
-    mag.rotation.x = 0.2;
-    g.add(body, barrel, scope, mag);
+    scope.position.set(0, 0.14, 0.02);
+    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.28, 0.1), s.gunTrim);
+    mag.position.set(0, -0.17, 0.14);
+    mag.rotation.x = 0.22;
+    g.add(stock, body, rail, barrel, scope, mag);
   } else {
-    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.085, 1.25, 10), s.rpgAccent);
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.38, 10), s.rpgAccent);
     tube.rotation.x = Math.PI / 2;
-    const warhead = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.28, 10), s.gunTrim);
+    const warhead = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.32, 10), s.gunTrim);
     warhead.rotation.x = Math.PI / 2;
-    warhead.position.z = 0.72;
+    warhead.position.z = 0.8;
     g.add(tube, warhead);
   }
   return g;
@@ -82,18 +101,18 @@ export function createCharacterRig(role = 'pedestrian', colors = {}) {
   const root = new THREE.Group();
 
   const defaults = {
-    player: { skin: 0xd89f78, jacket: 0xff5568, pants: 0x1d2638, hair: 0x1a1512, accent: 0x1de9d8 },
-    police: { skin: 0xdcb08e, jacket: 0x162b52, pants: 0x10192b, hair: 0x141d33, accent: 0x3b9eff },
-    cartel: { skin: 0xd49d76, jacket: 0x991b3b, pants: 0x1c1824, hair: 0x1a1614, accent: 0xffb347 },
+    player: { skin: 0xd89f78, jacket: 0xff4b68, pants: 0x1b2436, hair: 0x1a1512, accent: 0x1de9d8 },
+    police: { skin: 0xdcb08e, jacket: 0x152b54, pants: 0x101829, hair: 0x141d33, accent: 0x3b9eff },
+    cartel: { skin: 0xd49d76, jacket: 0x9c1b3e, pants: 0x1b1824, hair: 0x1a1614, accent: 0xffb347 },
     pedestrian: { skin: 0xdfb292, jacket: 0x2dd4c5, pants: 0x36445c, hair: 0x2a1e18, accent: 0xffd166 },
   };
   const pal = { ...(defaults[role] || defaults.pedestrian), ...colors };
 
   const skinMat = new THREE.MeshStandardMaterial({ color: pal.skin, roughness: 0.72 });
-  const jacketMat = new THREE.MeshStandardMaterial({ color: pal.jacket, roughness: 0.58 });
+  const jacketMat = new THREE.MeshStandardMaterial({ color: pal.jacket, roughness: 0.52, metalness: 0.08 });
   const pantsMat = new THREE.MeshStandardMaterial({ color: pal.pants, roughness: 0.76 });
   const hairMat = new THREE.MeshStandardMaterial({ color: pal.hair, roughness: 0.68 });
-  const accentMat = new THREE.MeshStandardMaterial({ color: pal.accent, roughness: 0.36, metalness: 0.25 });
+  const accentMat = new THREE.MeshStandardMaterial({ color: pal.accent, roughness: 0.32, metalness: 0.3 });
 
   const shadow = new THREE.Mesh(s.shadowGeo, s.shadowMat);
   shadow.position.y = 0.04;
@@ -104,70 +123,102 @@ export function createCharacterRig(role = 'pedestrian', colors = {}) {
 
   const pelvis = new THREE.Mesh(s.pelvisGeo, pantsMat);
   pelvis.position.y = 0.78;
+  const belt = new THREE.Mesh(s.beltGeo, s.gunMetal);
+  belt.position.y = 0.86;
+  const buckle = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.09, 0.05), accentMat);
+  buckle.position.set(0, 0.86, 0.16);
+
   const torso = new THREE.Mesh(s.torsoGeo, jacketMat);
-  torso.position.y = 1.18;
-  torso.scale.set(1.08, 1, 0.72);
+  torso.position.y = 1.19;
+  torso.scale.set(1.12, 1, 0.74);
   torso.castShadow = true;
 
-  // Jacket lapel / tactical back stripe
-  const vestTrim = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.54, 0.39), accentMat);
+  // Jacket collar, front/back lapel accent & SWAT tactical vest
+  const collar = new THREE.Mesh(s.collarGeo, jacketMat);
+  collar.position.y = 1.53;
+  const vestTrim = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.54, 0.42), accentMat);
   vestTrim.position.y = 1.19;
+  if (role === 'police') {
+    const vestPlate = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.42, 0.42), s.gunMetal);
+    vestPlate.position.y = 1.22;
+    bodyPivot.add(vestPlate);
+  }
 
-  // Collar + rounded sculpted head + styled hair crown
+  // Sculpted head + styled hair or SWAT helmet
   const head = new THREE.Mesh(s.headGeo, skinMat);
   head.position.y = 1.7;
-  head.scale.set(0.95, 1.06, 0.96);
+  head.scale.set(0.95, 1.07, 0.96);
   head.castShadow = true;
 
-  const hair = new THREE.Mesh(s.hairGeo, hairMat);
-  hair.position.set(0, 1.72, -0.01);
+  if (role === 'police') {
+    const helmet = new THREE.Mesh(s.helmetGeo, jacketMat);
+    helmet.position.set(0, 1.72, 0);
+    bodyPivot.add(helmet);
+  } else {
+    const hair = new THREE.Mesh(s.hairGeo, hairMat);
+    hair.position.set(0, 1.73, -0.015);
+    hair.scale.set(1.04, 1.08, 1.06);
+    bodyPivot.add(hair);
+  }
 
   if (role === 'player' || role === 'cartel' || role === 'police') {
     const shades = new THREE.Mesh(s.shadeGeo, s.gunMetal);
-    shades.position.set(0, 1.71, 0.14);
+    shades.position.set(0, 1.71, 0.145);
     bodyPivot.add(shades);
   }
 
+  // Left & Right articulated arms with jacket sleeve + forearm + hand
   const leftArm = new THREE.Group();
-  leftArm.position.set(-0.34, 1.44, 0);
+  leftArm.position.set(-0.36, 1.44, 0);
   const leftSh = new THREE.Mesh(s.shoulderGeo, jacketMat);
-  const leftArmMesh = new THREE.Mesh(s.armGeo, jacketMat);
-  leftArmMesh.castShadow = true;
-  leftArm.add(leftSh, leftArmMesh);
+  const leftUpper = new THREE.Mesh(s.upperArmGeo, jacketMat);
+  const leftFore = new THREE.Mesh(s.forearmGeo, role === 'police' ? jacketMat : skinMat);
+  const leftHand = new THREE.Mesh(s.handGeo, skinMat);
+  leftHand.position.y = -0.49;
+  leftUpper.castShadow = true;
+  leftArm.add(leftSh, leftUpper, leftFore, leftHand);
 
   const rightArm = new THREE.Group();
-  rightArm.position.set(0.34, 1.44, 0);
+  rightArm.position.set(0.36, 1.44, 0);
   const rightSh = new THREE.Mesh(s.shoulderGeo, jacketMat);
-  const rightArmMesh = new THREE.Mesh(s.armGeo, jacketMat);
-  rightArmMesh.castShadow = true;
-  rightArm.add(rightSh, rightArmMesh);
+  const rightUpper = new THREE.Mesh(s.upperArmGeo, jacketMat);
+  const rightFore = new THREE.Mesh(s.forearmGeo, role === 'police' ? jacketMat : skinMat);
+  const rightHand = new THREE.Mesh(s.handGeo, skinMat);
+  rightHand.position.y = -0.49;
+  rightUpper.castShadow = true;
+  rightArm.add(rightSh, rightUpper, rightFore, rightHand);
 
   const weaponSocket = new THREE.Group();
-  weaponSocket.position.set(0, -0.45, 0.16);
+  weaponSocket.position.set(0.02, -0.48, 0.14);
   rightArm.add(weaponSocket);
 
   const weaponVisuals = {};
   for (const id of ['pistol', 'smg', 'shotgun', 'carbine', 'rpg']) {
     const wm = buildWeaponMesh(id, s);
-    wm.position.z = id === 'pistol' ? 0.14 : 0.26;
+    wm.position.z = id === 'pistol' ? 0.16 : 0.34;
     wm.visible = false;
     weaponSocket.add(wm);
     weaponVisuals[id] = wm;
   }
 
+  // Articulated legs + sneakers/boots
   const leftLeg = new THREE.Group();
   leftLeg.position.set(-0.14, 0.72, 0);
   const leftLegMesh = new THREE.Mesh(s.legGeo, pantsMat);
   leftLegMesh.castShadow = true;
-  leftLeg.add(leftLegMesh);
+  const leftShoe = new THREE.Mesh(s.shoeGeo, s.shoeMat);
+  leftShoe.position.set(0, -0.66, 0.05);
+  leftLeg.add(leftLegMesh, leftShoe);
 
   const rightLeg = new THREE.Group();
   rightLeg.position.set(0.14, 0.72, 0);
   const rightLegMesh = new THREE.Mesh(s.legGeo, pantsMat);
   rightLegMesh.castShadow = true;
-  rightLeg.add(rightLegMesh);
+  const rightShoe = new THREE.Mesh(s.shoeGeo, s.shoeMat);
+  rightShoe.position.set(0, -0.66, 0.05);
+  rightLeg.add(rightLegMesh, rightShoe);
 
-  bodyPivot.add(pelvis, torso, vestTrim, head, hair, leftArm, rightArm, leftLeg, rightLeg);
+  bodyPivot.add(pelvis, belt, buckle, torso, collar, vestTrim, head, leftArm, rightArm, leftLeg, rightLeg);
 
   return {
     root,
@@ -199,11 +250,13 @@ export function createCharacterRig(role = 'pedestrian', colors = {}) {
 
       if (aiming) {
         rightArm.rotation.x = -Math.PI * 0.48;
-        leftArm.rotation.x = -Math.PI * 0.34;
-        leftArm.rotation.z = -0.26;
+        rightArm.rotation.y = -0.14;
+        leftArm.rotation.x = -Math.PI * 0.36;
+        leftArm.rotation.z = -0.28;
         weaponSocket.rotation.x = Math.PI * 0.48;
       } else {
         rightArm.rotation.x = -stride * 0.85;
+        rightArm.rotation.y = 0;
         leftArm.rotation.x = stride * 0.85;
         leftArm.rotation.z = 0;
         weaponSocket.rotation.x = 0;

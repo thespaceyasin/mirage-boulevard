@@ -269,7 +269,7 @@ export class VehicleEntity {
       steerAngle: this.steerAngle,
       braking: this.braking,
       sirenActive: this.sirenActive && this.disabledTimer <= 0,
-      nitroActive: this.nitroActive,
+      nitroActive: this.nitroActive || (this.drifting && this.speed > 22),
       wrecked: this.wrecked,
     });
 

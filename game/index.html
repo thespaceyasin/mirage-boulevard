@@ -195,11 +195,29 @@
       <div class="brand-kicker">SOLARA BAY // OPEN-WORLD SYNDICATE EDITION</div>
       <h1 class="brand-title">MIRAGE <span>BOULEVARD</span></h1>
       <p class="brand-sub">Explore 6 coastal districts, hijack exotic rides, outrun 5-star tactical police &amp; helicopters, and seize the boulevard across 8 story missions.</p>
-      <div class="start-actions">
-        <button id="btn-play" class="btn-primary" type="button">ENTER SOLARA BAY</button>
-        <button id="btn-continue" class="btn-secondary hidden" type="button">CONTINUE CAREER</button>
-        <button id="btn-start-map" class="btn-ghost" type="button">LOAD SAVE SLOTS</button>
+
+      <div class="start-menu-stack">
+        <button id="btn-continue" class="btn-primary start-btn-wide" type="button">CONTINUE CAMPAIGN (54%)</button>
+        <div class="start-btn-row">
+          <button id="btn-play" class="btn-secondary" type="button">NEW GAME</button>
+          <button id="btn-start-map" class="btn-ghost" type="button">LOAD SAVE</button>
+          <button id="btn-free-roam" class="btn-ghost" type="button">FREE ROAM</button>
+        </div>
+        <button id="btn-title-settings" class="btn-ghost start-btn-wide" type="button">CONTROLS &amp; SETTINGS</button>
       </div>
+
+      <div id="title-settings-panel" class="glass-panel hidden">
+        <div class="section-head">
+          <span>GAME SETTINGS &amp; AUDIO</span>
+          <button id="btn-title-settings-close" class="btn-chip" type="button">CLOSE</button>
+        </div>
+        <div class="settings-btn-grid">
+          <button id="btn-title-mood" class="btn-chip" type="button">TIME OF DAY: GOLDEN HR</button>
+          <button id="btn-title-audio" class="btn-chip" type="button">AUDIO &amp; RADIO: ON</button>
+          <button id="btn-title-camera" class="btn-chip" type="button">CAMERA PRESET: CHASE</button>
+        </div>
+      </div>
+
       <div class="controls-strip glass-panel">
         <div><strong>WASD</strong> Move / Drive</div>
         <div><strong>SHIFT</strong> Sprint / Nitro</div>
@@ -223,8 +241,9 @@
         </div>
         <div class="dash-career-pill">
           <span>CAREER</span>
-          <strong id="dash-career-pct" class="num-tab">38%</strong>
+          <strong id="dash-career-pct" class="num-tab">54%</strong>
           <div class="dash-career-bar"><div id="dash-career-fill"></div></div>
+          <span id="dash-respect-badge" class="respect-chip">LV.4 SYNDICATE BOSS</span>
         </div>
         <div class="dash-top-actions">
           <button id="btn-mood-cycle" class="btn-chip" type="button">TIME: GOLDEN HR</button>
@@ -241,7 +260,7 @@
             <span class="map-hint">Click any district or icon to set GPS Waypoint</span>
           </div>
           <div class="map-canvas-wrap">
-            <canvas id="city-map-canvas" width="660" height="460"></canvas>
+            <canvas id="city-map-canvas" width="660" height="440"></canvas>
           </div>
           <div class="map-legend">
             <span><i class="leg-dot player"></i>Mateo</span>
@@ -253,7 +272,7 @@
           </div>
         </div>
 
-        <!-- Right Sidebar: Missions, Crew, Stats & Save Slots -->
+        <!-- Right Sidebar: Missions, Crew, Garage Fleet & Save Slots -->
         <div class="dash-side-col">
           <div class="dash-stats-row">
             <div class="stat-box"><span>BANKROLL</span><strong id="dash-cash" class="num-tab">$0</strong></div>
@@ -264,19 +283,27 @@
 
           <div class="dash-section">
             <div class="section-head">
-              <span>STORY CAMPAIGN &amp; ACTIVITIES</span>
-              <span id="dash-active-tag">ACTIVE</span>
+              <span>8 STORY MISSIONS &amp; ACTIVITIES</span>
+              <span id="dash-active-tag">CAMPAIGN</span>
             </div>
             <div id="dash-mission-list" class="mission-list"></div>
           </div>
 
           <div class="dash-section">
-            <div class="section-head"><span>SYNDICATE CREW</span><span>[Z / X / C]</span></div>
+            <div class="section-head">
+              <span>SYNDICATE CREW &amp; SOLARA CUSTOMS GARAGE</span>
+              <span id="dash-garage-tier">7 / 12 TUNED</span>
+            </div>
             <div id="dash-crew-list" class="crew-roster"></div>
+            <div id="dash-garage-summary" class="garage-fleet-bar">
+              <span id="dash-garage-swatch" class="paint-swatch"></span>
+              <span id="dash-garage-spec">ECU LV2 &middot; SUSP LV2 &middot; ARMOR LV1 &middot; NOS LV2</span>
+              <span class="garage-key-hint">[G] GARAGE</span>
+            </div>
           </div>
 
           <div class="dash-section">
-            <div class="section-head"><span>SAVE SLOTS (OFFLINE STORAGE)</span><span>AUTO-SAVE ON</span></div>
+            <div class="section-head"><span>MULTI-SLOT SAVE (OFFLINE STORAGE)</span><span>AUTO-SAVE ON</span></div>
             <div id="dash-save-slots" class="save-slots-list"></div>
           </div>
         </div>
