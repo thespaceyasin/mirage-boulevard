@@ -1,19 +1,324 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Block Dodger</title>
-<style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #11141b; }
-  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  /* Read aloud, never shown: the status line screen readers announce. */
-  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MIRAGE BOULEVARD — Open-World Coastal Crime Action</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three.module.min.js"
+    }
+  }
+  </script>
 </head>
 <body>
-<canvas id="game" aria-label="Block Dodger: move the paddle left and right to dodge falling blocks and catch coins"></canvas>
-<p id="status" role="status" aria-live="polite"></p>
-<script type="module" src="./src/main.js"></script>
+  <canvas id="game-canvas" aria-label="Mirage Boulevard 3D Open-World Game"></canvas>
+  <div id="fx-flash" aria-hidden="true"></div>
+  <div id="focus-vignette" aria-hidden="true"></div>
+
+  <!-- Live Gameplay HUD -->
+  <div id="hud-root" class="hidden">
+    <!-- Top-Left: Active Mission + Police Dispatch -->
+    <div id="hud-top-left">
+      <div id="mission-card" class="glass-panel">
+        <div class="panel-accent coral"></div>
+        <div class="mission-header">
+          <span id="mission-tag" class="tag-chip">STORY MISSION</span>
+          <span id="mission-dist" class="num-tab">0m</span>
+        </div>
+        <div id="mission-title">COASTAL PICKUP</div>
+        <div id="mission-obj">Steal a Mirage Coupe on Mirage Boulevard</div>
+        <div id="mission-progress-wrap" class="hidden">
+          <div id="mission-progress-bar"></div>
+        </div>
+      </div>
+
+      <div id="dispatch-card" class="glass-panel hidden">
+        <div class="dispatch-header">
+          <span class="strobe-dot"></span>
+          <span class="dispatch-label">SBPD TACTICAL DISPATCH</span>
+          <span id="dispatch-state" class="dispatch-status">PURSUIT</span>
+        </div>
+        <div id="dispatch-units"></div>
+        <div id="evasion-bar-wrap" class="hidden">
+          <div id="evasion-bar-fill"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Top-Center: Event Banner / Radio Toast -->
+    <div id="hud-top-center">
+      <div id="toast-banner" class="hidden"></div>
+    </div>
+
+    <!-- Top-Right: Wanted Stars + Cash + Weapon + District/Time -->
+    <div id="hud-top-right">
+      <div id="district-pill" class="glass-panel compact">
+        <span id="district-name">MIRAGE BOULEVARD</span>
+        <span class="sep">|</span>
+        <span id="clock-display" class="num-tab">17:45</span>
+        <span id="mood-badge">GOLDEN HR</span>
+      </div>
+
+      <div id="wanted-row" aria-label="Wanted level">
+        <span class="wanted-star" data-star="1">&#9733;</span>
+        <span class="wanted-star" data-star="2">&#9733;</span>
+        <span class="wanted-star" data-star="3">&#9733;</span>
+        <span class="wanted-star" data-star="4">&#9733;</span>
+        <span class="wanted-star" data-star="5">&#9733;</span>
+      </div>
+
+      <div id="cash-row" class="num-tab">$4,250</div>
+
+      <div id="weapon-cluster" class="glass-panel">
+        <div class="weapon-top">
+          <span id="weapon-icon" class="weapon-glyph">9MM</span>
+          <div class="weapon-meta">
+            <div id="weapon-name">COASTAL PISTOL</div>
+            <div id="weapon-ammo" class="num-tab">15 <span>/ 90</span></div>
+          </div>
+        </div>
+        <div id="weapon-slots">
+          <span class="w-slot active" data-slot="0">1</span>
+          <span class="w-slot" data-slot="1">2</span>
+          <span class="w-slot" data-slot="2">3</span>
+          <span class="w-slot" data-slot="3">4</span>
+          <span class="w-slot" data-slot="4">5</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Center Crosshair & Hitmarker -->
+    <div id="crosshair" class="hidden" aria-hidden="true">
+      <div class="ch-line ch-top"></div>
+      <div class="ch-line ch-bottom"></div>
+      <div class="ch-line ch-left"></div>
+      <div class="ch-line ch-right"></div>
+      <div class="ch-dot"></div>
+      <div id="hitmarker" class="hidden"></div>
+    </div>
+
+    <!-- Center-Bottom: Contextual Prompt & Character Dialogue -->
+    <div id="hud-bottom-center">
+      <div id="interact-prompt" class="hidden"></div>
+      <div id="dialogue-banner" class="glass-panel hidden">
+        <canvas id="dialogue-portrait" width="64" height="64"></canvas>
+        <div class="dialogue-copy">
+          <div id="dialogue-speaker">NADIA VALE <span>// NETRUNNER</span></div>
+          <div id="dialogue-text">Grab the prototype coupe before Solis locks down the boulevard.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom-Left: Vector Minimap + Vitals -->
+    <div id="hud-bottom-left">
+      <div id="minimap-frame" class="glass-panel">
+        <canvas id="minimap-canvas" width="204" height="156"></canvas>
+        <div class="minimap-overlay-bar">
+          <span id="minimap-gps">GPS ACTIVE</span>
+          <span id="minimap-hint">[M] MAP &middot; [ESC] MENU</span>
+        </div>
+      </div>
+      <div id="vitals-strip">
+        <div class="vital-bar">
+          <span class="vital-label">HP</span>
+          <div class="vital-track"><div id="hp-fill" class="vital-fill hp"></div></div>
+          <span id="hp-val" class="vital-num num-tab">100</span>
+        </div>
+        <div class="vital-bar">
+          <span class="vital-label">AR</span>
+          <div class="vital-track"><div id="armor-fill" class="vital-fill armor"></div></div>
+          <span id="armor-val" class="vital-num num-tab">75</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom-Right: Speedometer + Crew Abilities + Radio -->
+    <div id="hud-bottom-right">
+      <div id="speedo-panel" class="glass-panel hidden">
+        <div class="speedo-main">
+          <div id="speed-value" class="num-tab">0</div>
+          <div class="speedo-unit">
+            <span>MPH</span>
+            <span id="gear-value" class="gear-chip">1</span>
+          </div>
+        </div>
+        <div id="vehicle-label">SOLARA APEX GT</div>
+        <div class="speedo-meters">
+          <div class="mini-meter">
+            <span>NOS</span>
+            <div class="mini-track"><div id="nitro-fill" class="mini-fill nitro"></div></div>
+          </div>
+          <div class="mini-meter">
+            <span>HULL</span>
+            <div class="mini-track"><div id="veh-hp-fill" class="mini-fill hull"></div></div>
+          </div>
+        </div>
+        <div id="drift-badge" class="hidden">DRIFT x2</div>
+      </div>
+
+      <div id="crew-bar">
+        <button class="crew-slot" id="crew-z" data-ability="blackout" type="button">
+          <span class="crew-key">Z</span>
+          <span class="crew-title">BLACKOUT</span>
+          <span class="crew-sub">Nadia</span>
+          <div class="crew-cd-bar"><div></div></div>
+        </button>
+        <button class="crew-slot" id="crew-x" data-ability="nitro" type="button">
+          <span class="crew-key">X</span>
+          <span class="crew-title">OVERDRIVE</span>
+          <span class="crew-sub">Rico</span>
+          <div class="crew-cd-bar"><div></div></div>
+        </button>
+        <button class="crew-slot" id="crew-c" data-ability="focus" type="button">
+          <span class="crew-key">C</span>
+          <span class="crew-title">FOCUS</span>
+          <span class="crew-sub">Tessa</span>
+          <div class="crew-cd-bar"><div></div></div>
+        </button>
+      </div>
+
+      <div id="radio-pill" class="glass-panel compact">
+        <span class="radio-eq"><i></i><i></i><i></i></span>
+        <span id="radio-station">98.7 SOLARA WAVE</span>
+        <span class="radio-key">[Q]</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Start / Title Screen Overlay -->
+  <div id="start-overlay">
+    <div class="start-backdrop"></div>
+    <div class="start-content">
+      <div class="brand-kicker">SOLARA BAY // OPEN-WORLD SYNDICATE EDITION</div>
+      <h1 class="brand-title">MIRAGE <span>BOULEVARD</span></h1>
+      <p class="brand-sub">Explore 6 coastal districts, hijack exotic rides, outrun 5-star tactical police &amp; helicopters, and seize the boulevard across 8 story missions.</p>
+      <div class="start-actions">
+        <button id="btn-play" class="btn-primary" type="button">ENTER SOLARA BAY</button>
+        <button id="btn-continue" class="btn-secondary hidden" type="button">CONTINUE CAREER</button>
+        <button id="btn-start-map" class="btn-ghost" type="button">LOAD SAVE SLOTS</button>
+      </div>
+      <div class="controls-strip glass-panel">
+        <div><strong>WASD</strong> Move / Drive</div>
+        <div><strong>SHIFT</strong> Sprint / Nitro</div>
+        <div><strong>SPACE</strong> Jump / Drift</div>
+        <div><strong>F</strong> Steal / Exit Car</div>
+        <div><strong>LMB / RMB</strong> Shoot / Aim</div>
+        <div><strong>1-5</strong> Weapons</div>
+        <div><strong>Z X C</strong> Crew Skills</div>
+        <div><strong>G</strong> Garage &middot; <strong>Q</strong> Radio &middot; <strong>ESC</strong> Map</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pause / Interactive City Map / Career & Save Dashboard -->
+  <div id="dashboard-overlay" class="hidden">
+    <div class="dash-shell glass-panel">
+      <div class="dash-topbar">
+        <div class="dash-brand">
+          <span class="dash-title">MIRAGE BOULEVARD</span>
+          <span class="dash-sub">SOLARA BAY TACTICAL NETWORK</span>
+        </div>
+        <div class="dash-career-pill">
+          <span>CAREER</span>
+          <strong id="dash-career-pct" class="num-tab">38%</strong>
+          <div class="dash-career-bar"><div id="dash-career-fill"></div></div>
+        </div>
+        <div class="dash-top-actions">
+          <button id="btn-mood-cycle" class="btn-chip" type="button">TIME: GOLDEN HR</button>
+          <button id="btn-audio-toggle" class="btn-chip" type="button">AUDIO: ON</button>
+          <button id="btn-resume" class="btn-primary compact-btn" type="button">RESUME [ESC]</button>
+        </div>
+      </div>
+
+      <div class="dash-grid">
+        <!-- Interactive City Map -->
+        <div class="dash-map-col">
+          <div class="section-head">
+            <span>INTERACTIVE CITY MAP &mdash; SOLARA BAY</span>
+            <span class="map-hint">Click any district or icon to set GPS Waypoint</span>
+          </div>
+          <div class="map-canvas-wrap">
+            <canvas id="city-map-canvas" width="660" height="460"></canvas>
+          </div>
+          <div class="map-legend">
+            <span><i class="leg-dot player"></i>Mateo</span>
+            <span><i class="leg-dot mission"></i>Mission</span>
+            <span><i class="leg-dot race"></i>Street Race</span>
+            <span><i class="leg-dot garage"></i>Solara Customs</span>
+            <span><i class="leg-dot police"></i>SBPD Unit</span>
+            <span><i class="leg-dot palm"></i>Golden Palm</span>
+          </div>
+        </div>
+
+        <!-- Right Sidebar: Missions, Crew, Stats & Save Slots -->
+        <div class="dash-side-col">
+          <div class="dash-stats-row">
+            <div class="stat-box"><span>BANKROLL</span><strong id="dash-cash" class="num-tab">$0</strong></div>
+            <div class="stat-box"><span>MISSIONS</span><strong id="dash-missions-count" class="num-tab">0 / 8</strong></div>
+            <div class="stat-box"><span>PALMS</span><strong id="dash-palms-count" class="num-tab">0 / 10</strong></div>
+            <div class="stat-box"><span>HEAT PEAK</span><strong id="dash-heat-peak" class="num-tab">0&#9733;</strong></div>
+          </div>
+
+          <div class="dash-section">
+            <div class="section-head">
+              <span>STORY CAMPAIGN &amp; ACTIVITIES</span>
+              <span id="dash-active-tag">ACTIVE</span>
+            </div>
+            <div id="dash-mission-list" class="mission-list"></div>
+          </div>
+
+          <div class="dash-section">
+            <div class="section-head"><span>SYNDICATE CREW</span><span>[Z / X / C]</span></div>
+            <div id="dash-crew-list" class="crew-roster"></div>
+          </div>
+
+          <div class="dash-section">
+            <div class="section-head"><span>SAVE SLOTS (OFFLINE STORAGE)</span><span>AUTO-SAVE ON</span></div>
+            <div id="dash-save-slots" class="save-slots-list"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Solara Customs Garage Upgrade & Respray Shop -->
+  <div id="garage-overlay" class="hidden">
+    <div class="garage-shell glass-panel">
+      <div class="garage-head">
+        <div>
+          <div class="brand-kicker">TORQUE QUARTER // CUSTOM TUNING</div>
+          <h2>SOLARA CUSTOMS GARAGE</h2>
+        </div>
+        <div class="garage-cash num-tab" id="garage-cash">$0</div>
+        <button id="btn-garage-close" class="btn-primary compact-btn" type="button">EXIT GARAGE [G]</button>
+      </div>
+
+      <div class="garage-body">
+        <div class="garage-col">
+          <div class="section-head"><span>METALLIC RESPRAY &amp; HEAT WIPE</span><span>$250</span></div>
+          <div id="garage-paints" class="paint-grid"></div>
+          <button id="btn-garage-repair" class="btn-secondary full-w" type="button">REPAIR HULL &amp; CLEAR WANTED HEAT ($300)</button>
+        </div>
+        <div class="garage-col">
+          <div class="section-head"><span>PERFORMANCE UPGRADES</span><span>SAVED TO FLEET</span></div>
+          <div id="garage-upgrades" class="upgrade-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Wasted / Busted Respawn Overlay -->
+  <div id="wasted-overlay" class="hidden">
+    <div class="wasted-card glass-panel">
+      <div id="wasted-title">FLATLINED</div>
+      <div id="wasted-sub">Emergency clinic patched you up at Mirage Medical (-$250).</div>
+      <button id="btn-respawn" class="btn-primary" type="button">BACK TO THE STREETS</button>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
 </body>
 </html>
